@@ -10,6 +10,8 @@ dependencies = [
     "pyarrow>=17.0",
     "openpyxl>=3.1",
     "numpy>=1.26",
+    # Gemini: generation, Google Search grounding, embeddings
+    "google-genai>=2.33,<3",
     # Google APIs
     "google-api-python-client>=2.140",
     "google-auth>=2.34",
@@ -19,6 +21,7 @@ dependencies = [
     "httpx>=0.27",
     "tenacity>=9.0",
     "selectolax>=0.3.21",
+    "trafilatura>=2.3",
     "advertools>=0.16",
     "tldextract>=5.1",
     # Analysis
@@ -27,6 +30,8 @@ dependencies = [
     # Visualization
     "plotly>=5.24",
     "matplotlib>=3.9",
+    # Local dashboard (`uv run seo app`)
+    "streamlit>=1.66,<1.67",
     # CLI, config, utils
     "typer>=0.12",
     "rich>=13.8",
@@ -36,12 +41,16 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Semantic keyword clustering (pulls in PyTorch, ~2GB)
-semantic = ["sentence-transformers>=3.1"]
-# LLM-assisted intent classification / cluster labelling
-llm = ["anthropic>=0.40"]
+# Lemmas, sentences and noun phrases for phrase statistics
+nlp = ["spacy>=3.8"]
+# Google Natural Language API: entity salience
+language-api = ["google-cloud-language>=2.21"]
 # Fast processing of very large exports
 polars = ["polars>=1.9"]
+# Local embeddings without an API (pulls in PyTorch, ~2GB)
+local-embeddings = ["sentence-transformers>=3.1"]
+# Everything except local-embeddings
+all = ["seo-toolkit[nlp,language-api,polars]"]
 
 [project.scripts]
 seo = "seo_toolkit.cli:app"
@@ -55,6 +64,7 @@ dev = [
     "pandas-stubs>=2.2",
     "types-pyyaml>=6.0",
     "pre-commit>=3.8",
+    "watchdog>=6.0,<7",  # fast dashboard reload while editing code
     "jupyterlab>=4.2",
     "ipykernel>=6.29",
 ]
@@ -83,6 +93,9 @@ select = [
     "SIM",     # simplify
     "PD",      # pandas-vet
     "RUF",
+]
+ignore = [
+    "RUF001", "RUF002", "RUF003",  # en dashes and curly quotes in user-facing text are intended
 ]
 
 [tool.ruff.lint.per-file-ignores]
