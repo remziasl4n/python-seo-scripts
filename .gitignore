@@ -12,7 +12,6 @@ token*.json
 # --- Site / client config ----------------------------------------------------
 config/sites/*
 !config/sites/example.yaml
-config/settings.yaml
 
 # --- Data (keep folder structure only) ---------------------------------------
 data/**/*

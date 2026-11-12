@@ -1,0 +1,59 @@
+# Site settings. Copy this file to config/sites/<your-site>.yaml, fill it in,
+# and set SEO_SITE=<your-site> in .env (or pass --site <your-site>).
+# Your own site files are gitignored; only this example is committed.
+#
+# The "Semantic context" fields drive every planning tool. They are explained
+# in docs/semantic-seo-principles.md, section 2.1.
+
+name: example
+domain: https://www.example.com/
+country: us   # ISO 3166-1 alpha-2, used for autocomplete, SERP and GSC filters
+language: en  # ISO 639-1
+
+# --- Semantic context ---------------------------------------------------------
+
+# Why the site exists and how it makes money. Decides which attributes of the
+# central entity the site should cover, and which to leave alone.
+source_context: >
+  Acme Pools designs and installs in-ground swimming pools for homeowners in
+  Texas. Content should help homeowners plan a pool and lead them to request
+  a quote.
+
+# The entity every section of the site is about, and its type.
+central_entity: swimming pool
+entity_type: product
+
+# Site sections and their role in the topical map.
+#   core:  the central entity's main attribute, tied to the source context
+#   outer: minor attributes that build trust and pass relevance to the core
+sections:
+  - path: /pools/
+    name: Pool types
+    role: core
+  - path: /cost/
+    name: Pricing
+    role: core
+  - path: /guides/
+    name: Pool ownership guides
+    role: outer
+
+# --- Brand and competitors ----------------------------------------------------
+
+# Terms that mark a query as branded (case-insensitive, matched as substrings).
+brand_terms:
+  - acme pools
+  - acmepools
+
+competitors:
+  - https://www.competitor-one.example/
+  - https://www.competitor-two.example/
+
+# --- Data sources -------------------------------------------------------------
+
+# "sc-domain:example.com" for a domain property, or the full URL prefix.
+gsc_property: sc-domain:example.com
+# Numeric GA4 property ID (Admin > Property settings). Leave empty if unused.
+ga4_property_id: ""
+
+sitemaps:
+  - https://www.example.com/sitemap.xml
