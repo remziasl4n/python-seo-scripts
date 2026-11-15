@@ -41,6 +41,55 @@ def run_app(port: Annotated[int, typer.Option(help="Port to serve on.")] = 8501)
     raise typer.Exit(subprocess.call(command))
 
 
+@app.command("api")
+def run_api(
+    port: Annotated[int, typer.Option(help="Port to serve on.")] = 8000,
+    reload: Annotated[bool, typer.Option(help="Restart when Python code changes.")] = True,
+) -> None:
+    """Start the web app's API (docs at http://localhost:8000/api/docs)."""
+    import uvicorn
+
+    from seo_toolkit.core.db import is_ready
+
+    ready, detail = is_ready(get_settings())
+    if not ready:
+        console.print(f"[red]{detail}[/red]")
+        raise typer.Exit(1)
+
+    # 127.0.0.1 only: the API can spend your API quota, so nothing else on the network gets in
+    uvicorn.run(
+        "seo_toolkit.api.app:create_app",
+        factory=True,
+        host="127.0.0.1",
+        port=port,
+        reload=reload,
+        reload_dirs=[str(Path(__file__).parent)] if reload else None,
+    )
+
+
+db_app = typer.Typer(help="Set up and update the database.", no_args_is_help=True)
+app.add_typer(db_app, name="db")
+
+
+@db_app.command("setup")
+def db_setup() -> None:
+    """Create the database if needed, bring its tables up to date, import old run files."""
+    from seo_toolkit.core.db import setup_database
+    from seo_toolkit.core.runs import import_run_files
+
+    settings = get_settings()
+    try:
+        created = setup_database(settings)
+        imported = import_run_files(settings)
+    except ToolkitError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1) from e
+    name = settings.database_url.rsplit("/", 1)[-1]
+    console.print(f"{'Created' if created else 'Found'} database {name}; tables are up to date.")
+    if imported:
+        console.print(f"Imported {imported} earlier run(s) from data/runs/.")
+
+
 @app.command()
 def doctor(
     site: Annotated[str | None, typer.Option(help="Site file to check.")] = None,
@@ -56,8 +105,8 @@ def doctor(
         raise typer.Exit(1) from e
     checks = config_checks(settings, site)
     if live:
-        with console.status("Calling the APIs…"):
-            checks += live_checks(settings)
+        with console.status("Calling the APIs…") as status:
+            checks += live_checks(settings, on_step=lambda step: status.update(f"Testing {step}"))
     table = Table("", "Area", "Check", "Detail", show_lines=False)
     for c in checks:
         table.add_row(ICONS[c.status], c.area, c.name, c.detail)

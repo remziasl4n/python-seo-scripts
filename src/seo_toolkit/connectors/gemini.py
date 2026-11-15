@@ -20,11 +20,18 @@ from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass
 from typing import Any, Literal, TypeVar
 
+import httpx
 import numpy as np
 from google import genai
 from google.genai import errors, types
 from pydantic import BaseModel, ValidationError
-from tenacity import Retrying, retry_if_exception, stop_after_attempt, wait_exponential
+from tenacity import (
+    RetryCallState,
+    Retrying,
+    retry_if_exception,
+    stop_after_attempt,
+    wait_exponential,
+)
 from tenacity.wait import wait_base
 
 from seo_toolkit.core.cache import Cache
@@ -126,14 +133,56 @@ class Usage:
     embedded_texts: int = 0
 
 
+Purpose = Literal["text", "grounding", "embeddings"]
+# The .env setting that picks the model for each kind of call
+_MODEL_SETTING: dict[str, str] = {
+    "text": "GEMINI_MODEL",
+    "grounding": "GEMINI_GROUNDING_MODEL",
+    "embeddings": "GEMINI_EMBEDDING_MODEL",
+}
+FALLBACK_MODEL = "gemini-2.5-flash"
+
+
+def _retry_delay(error: errors.APIError) -> float | None:
+    """Seconds Google asks us to wait (its RetryInfo), or None if it gave no delay.
+
+    A 429 with a delay is a short rate limit worth waiting out. A 429 without one is a
+    quota the plan doesn't have, and retrying can't fix it.
+    """
+    body = error.details if isinstance(error.details, dict) else {}
+    for detail in body.get("error", {}).get("details", None) or []:
+        if isinstance(detail, dict) and str(detail.get("@type", "")).endswith("RetryInfo"):
+            try:
+                return float(str(detail.get("retryDelay", "0s")).rstrip("s"))
+            except ValueError:
+                return 0.0
+    return None
+
+
 def _is_retryable(error: BaseException) -> bool:
-    if isinstance(error, errors.ServerError):
+    if isinstance(error, (errors.ServerError, httpx.TimeoutException)):
         return True
-    return isinstance(error, errors.ClientError) and error.code == 429
+    return (
+        isinstance(error, errors.ClientError)
+        and error.code == 429
+        and _retry_delay(error) is not None
+    )
 
 
-def _explain(error: errors.APIError) -> str:
-    code, message = error.code, error.message or str(error)
+def _wait_with(backoff: wait_base) -> Callable[[RetryCallState], float]:
+    """Wait as long as Google asks when it says; otherwise back off exponentially."""
+
+    def wait(state: RetryCallState) -> float:
+        error = state.outcome.exception() if state.outcome else None
+        delay = _retry_delay(error) if isinstance(error, errors.APIError) else None
+        return min(delay, 60.0) if delay is not None else backoff(state)
+
+    return wait
+
+
+def _explain(error: errors.APIError, model: str, purpose: Purpose) -> str:
+    code, message = error.code, (error.message or str(error)).strip()
+    setting = _MODEL_SETTING[purpose]
     if code in (401, 403) or (code == 400 and "api key" in message.lower()):
         return (
             f"Gemini rejected the request ({code}): {message}\n"
@@ -141,12 +190,27 @@ def _explain(error: errors.APIError) -> str:
         )
     if code == 404:
         return (
-            f"Gemini model not found ({code}): {message}\n"
-            "Check GEMINI_MODEL / GEMINI_EMBEDDING_MODEL in .env against "
-            "https://aistudio.google.com/docs/models."
+            f"Gemini model {model} not found ({code}).\n"
+            f"Check {setting} in .env against https://aistudio.google.com/docs/models."
         )
+    if code == 429 and _retry_delay(error) is None:
+        advice = (
+            "Grounding on Gemini 3 models needs a paid plan. "
+            f"Set GEMINI_GROUNDING_MODEL={FALLBACK_MODEL} in .env, or enable billing at "
+            "https://aistudio.google.com."
+            if purpose == "grounding"
+            else "Check usage at https://ai.dev/rate-limit, wait for the daily reset, "
+            f"switch {setting} to another model, or enable billing."
+        )
+        return f"Your Gemini plan has no quota for {purpose} on {model} (429).\n{advice}"
     if code == 429:
-        return f"Gemini rate limit or quota reached, even after retrying: {message}"
+        return f"Gemini rate limit on {model} (429), even after waiting and retrying: {message}"
+    if code in (500, 502, 503, 504):
+        return (
+            f"Gemini model {model} is overloaded right now ({code}).\n"
+            f"Try again in a few minutes, or set {setting} in .env to another model, "
+            f"e.g. {FALLBACK_MODEL}."
+        )
     return f"Gemini API error ({code}): {message}"
 
 
@@ -164,47 +228,76 @@ class Gemini:
         embedding_model: str,
         dimensions: int = 768,
         grounding: bool = True,
+        grounding_model: str | None = None,
         cache: Cache | None = None,
         batch_size: int = 100,
         max_attempts: int = 5,
         retry_wait: wait_base | None = None,
+        timeout_seconds: float | None = None,
     ) -> None:
+        """`grounding_model` defaults to `model`. `timeout_seconds` is only used in messages."""
         self.client = client
         self.model = model
+        self.grounding_model = grounding_model or model
         self.embedding_model = embedding_model
         self.dimensions = dimensions
         self.grounding = grounding
         self.cache = cache
         self.batch_size = batch_size
+        self.timeout_seconds = timeout_seconds
         self.usage = Usage()
         self._retrying = Retrying(
             retry=retry_if_exception(_is_retryable),
             stop=stop_after_attempt(max_attempts),
-            wait=retry_wait or wait_exponential(multiplier=2, max=60),
+            wait=retry_wait or _wait_with(wait_exponential(multiplier=2, max=60)),
             reraise=True,
         )
 
     @classmethod
-    def from_settings(cls, settings: Settings | None = None, refresh: bool = False) -> Gemini:
+    def from_settings(
+        cls,
+        settings: Settings | None = None,
+        refresh: bool = False,
+        max_attempts: int = 5,
+        timeout_seconds: float | None = None,
+    ) -> Gemini:
+        """`timeout_seconds` overrides GEMINI_TIMEOUT_SECONDS for every request."""
         settings = settings or get_settings()
-        client = genai.Client(api_key=settings.require("gemini_api_key"))
+        timeout = timeout_seconds or settings.gemini_timeout_seconds
+        client = genai.Client(
+            api_key=settings.require("gemini_api_key"),
+            http_options=types.HttpOptions(timeout=int(timeout * 1000)),
+        )
         return cls(
             client,
             model=settings.gemini_model,
+            grounding_model=settings.gemini_grounding_model,
             embedding_model=settings.gemini_embedding_model,
             dimensions=settings.gemini_embedding_dimensions,
             grounding=settings.gemini_grounding,
             cache=Cache.from_settings(settings, refresh=refresh),
+            max_attempts=max_attempts,
+            timeout_seconds=timeout,
         )
 
     # --- Plumbing -------------------------------------------------------------------
 
-    def _call(self, fn: Callable[..., Any], **kwargs: Any) -> Any:
-        """Call the API, retrying on overload and rate limits, with readable errors."""
+    def _call(self, fn: Callable[..., Any], purpose: Purpose, **kwargs: Any) -> Any:
+        """Call the API, retrying on overload and short rate limits, with readable errors."""
+        model = str(kwargs.get("model", ""))
         try:
             response = self._retrying(fn, **kwargs)
         except errors.APIError as e:
-            raise GeminiError(_explain(e)) from e
+            raise GeminiError(_explain(e, model, purpose)) from e
+        except httpx.TimeoutException as e:
+            limit = f" within {self.timeout_seconds:g}s" if self.timeout_seconds else ""
+            raise GeminiError(
+                f"Gemini model {model} didn't answer{limit}. It may be "
+                f"overloaded: try again, or set {_MODEL_SETTING[purpose]} to another model "
+                f"(e.g. {FALLBACK_MODEL}) or raise GEMINI_TIMEOUT_SECONDS."
+            ) from e
+        except httpx.HTTPError as e:
+            raise GeminiError(f"Couldn't reach the Gemini API: {e}") from e
         self.usage.requests += 1
         usage = getattr(response, "usage_metadata", None)
         if usage:
@@ -247,6 +340,7 @@ class Gemini:
         def call() -> str:
             response = self._call(
                 self.client.models.generate_content,
+                "text",
                 model=self.model,
                 contents=prompt,
                 config=types.GenerateContentConfig(
@@ -278,6 +372,7 @@ class Gemini:
         def call() -> Any:
             response = self._call(
                 self.client.models.generate_content,
+                "text",
                 model=self.model,
                 contents=prompt,
                 config=types.GenerateContentConfig(
@@ -306,12 +401,13 @@ class Gemini:
                 "Grounding with Google Search is turned off. "
                 "Set GEMINI_GROUNDING=true in .env to use this."
             )
-        key = {"model": self.model, "prompt": prompt, "system": system}
+        key = {"model": self.grounding_model, "prompt": prompt, "system": system}
 
         def call() -> dict[str, Any]:
             response = self._call(
                 self.client.models.generate_content,
-                model=self.model,
+                "grounding",
+                model=self.grounding_model,
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     system_instruction=system,
@@ -329,7 +425,7 @@ class Gemini:
         candidate = response.candidates[0] if response.candidates else None
         meta = candidate.grounding_metadata if candidate else None
         if meta is None:  # the model answered without searching
-            return GroundedAnswer(text, (), (), (), self.model)
+            return GroundedAnswer(text, (), (), (), self.grounding_model)
 
         sources: list[Source] = []
         index_map: dict[int, int] = {}  # chunk index -> index in `sources`
@@ -359,7 +455,7 @@ class Gemini:
             search_queries=tuple(meta.web_search_queries or []),
             sources=tuple(sources),
             citations=tuple(citations),
-            model=self.model,
+            model=self.grounding_model,
         )
 
     # --- Embeddings -----------------------------------------------------------------
@@ -428,6 +524,7 @@ class Gemini:
         contents = [types.Content(parts=[types.Part.from_text(text=t)]) for t in texts]
         response = self._call(
             self.client.models.embed_content,
+            "embeddings",
             model=self.embedding_model,
             contents=contents,
             config=types.EmbedContentConfig(

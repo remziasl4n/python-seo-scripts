@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 import pytest
@@ -40,6 +41,32 @@ def test_secrets_are_hidden_when_printed(project):
 def test_require_names_the_env_variable(settings):
     with pytest.raises(ConfigError, match="GEMINI_API_KEY is not set"):
         settings.require("gemini_api_key")
+
+
+def test_saving_env_is_picked_up_without_restart(project):
+    """A running dashboard must see a key added to .env after it started."""
+    env = project / ".env"
+    env.write_text("GEMINI_API_KEY=\n")
+    assert get_settings().gemini_api_key is None
+    assert get_settings() is get_settings()  # unchanged file: not re-read
+
+    env.write_text("GEMINI_API_KEY=new-key\nGEMINI_MODEL=gemini-2.5-flash\n")
+    stat = env.stat()
+    os.utime(env, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000))  # a later save
+    settings = get_settings()
+    assert settings.require("gemini_api_key") == "new-key"
+    assert settings.gemini_model == "gemini-2.5-flash"
+
+
+def test_env_example_loads_as_copied(project):
+    """`cp .env.example .env` must give working settings: every value arrives as text."""
+    repo = Path(__file__).resolve().parents[1]
+    (project / ".env").write_text((repo / ".env.example").read_text())
+    settings = get_settings()
+    assert settings.gemini_embedding_dimensions == 768
+    assert settings.gemini_grounding is True
+    assert settings.crawler_delay_seconds == 0.5
+    assert settings.gemini_api_key is None  # empty in the example
 
 
 def test_invalid_env_value_is_reported(project):

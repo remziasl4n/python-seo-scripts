@@ -67,11 +67,16 @@ class Settings(BaseSettings):
     seo_cache_dir: Path = Path(".cache")
     seo_cache_ttl_hours: float = Field(24, ge=0)
 
+    # Local Postgres over its socket, as your own user: no password needed
+    database_url: str = "postgresql+psycopg:///seo_toolkit"
+
     gemini_api_key: SecretStr | None = None
-    gemini_model: str = "gemini-3.8-flash"
+    gemini_model: str = "gemini-2.5-flash"
+    gemini_grounding_model: str | None = None  # None = same as gemini_model
     gemini_embedding_model: str = "gemini-embedding-2"
-    gemini_embedding_dimensions: Literal[768, 1536, 3072] = 768
+    gemini_embedding_dimensions: int = 768
     gemini_grounding: bool = True
+    gemini_timeout_seconds: float = Field(60, gt=0)
 
     google_application_credentials: Path | None = None
     google_api_key: SecretStr | None = None
@@ -86,6 +91,15 @@ class Settings(BaseSettings):
     crawler_concurrency: int = Field(5, ge=1)
     crawler_timeout_seconds: float = Field(20, gt=0)
     crawler_delay_seconds: float = Field(0.5, ge=0)
+
+    # An int field plus this check, rather than Literal[768, ...]: .env values arrive as
+    # text, and a Literal of ints won't accept "768"
+    @field_validator("gemini_embedding_dimensions")
+    @classmethod
+    def _supported_dimensions(cls, value: int) -> int:
+        if value not in (768, 1536, 3072):
+            raise ValueError("must be 768, 1536 or 3072")
+        return value
 
     def resolve(self, path: Path) -> Path:
         """Make a relative path from .env relative to the project root."""
@@ -126,14 +140,31 @@ class Settings(BaseSettings):
         return str(value)
 
 
-@lru_cache
 def get_settings() -> Settings:
-    """Settings for this run, read once from the environment and the project's .env."""
+    """Settings from the environment and the project's .env.
+
+    Read once, then again whenever .env is saved, so a running dashboard picks up
+    new keys and models without a restart.
+    """
     root = project_root()
+    try:
+        saved_at: int | None = (root / ".env").stat().st_mtime_ns
+    except OSError:
+        saved_at = None
+    return _load_settings(root, saved_at)
+
+
+@lru_cache(maxsize=4)
+def _load_settings(root: Path, saved_at: int | None) -> Settings:
     try:
         return Settings(_env_file=root / ".env", project_dir=root)  # type: ignore[call-arg]
     except ValidationError as e:
         raise ConfigError(f"Invalid value in .env:\n{_format_errors(e, env_names=True)}") from e
+
+
+def reload_settings() -> None:
+    """Forget loaded settings, e.g. after changing environment variables in a test."""
+    _load_settings.cache_clear()
 
 
 # --- Site files --------------------------------------------------------------------

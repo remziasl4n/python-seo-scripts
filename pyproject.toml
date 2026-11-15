@@ -30,7 +30,14 @@ dependencies = [
     # Visualization
     "plotly>=5.24",
     "matplotlib>=3.9",
-    # Local dashboard (`uv run seo app`)
+    # Web app API (`uv run seo api`), used by the Next.js front end in web/
+    "fastapi>=0.162,<0.163",
+    "uvicorn>=0.54",
+    # Database: Postgres via SQLAlchemy, migrations with Alembic
+    "sqlalchemy>=2.1",
+    "alembic>=1.20",
+    "psycopg[binary]>=3.3",
+    # Local dashboard (`uv run seo app`), until the Next.js app replaces it
     "streamlit>=1.66,<1.67",
     # CLI, config, utils
     "typer>=0.12",
@@ -107,6 +114,10 @@ testpaths = ["tests"]
 addopts = "-ra --strict-markers"
 markers = [
     "network: tests that hit real APIs or the internet (deselect with -m 'not network')",
+]
+filterwarnings = [
+    # From FastAPI's own TestClient import, not our code
+    "ignore:Using `httpx` with `starlette.testclient` is deprecated",
 ]
 
 # --- Mypy ----------------------------------------------------------------------

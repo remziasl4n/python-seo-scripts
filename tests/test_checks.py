@@ -43,11 +43,13 @@ def test_credentials_path_must_exist(project):
 
 class FakeGemini:
     model = "gemini-test"
+    grounding_model = "gemini-grounding-test"
     embedding_model = "gemini-embedding-test"
 
     def __init__(self, fail_embeddings: bool = False) -> None:
         self.cache = object()
         self.fail_embeddings = fail_embeddings
+        self.searches: tuple[str, ...] = ("top news today",)
 
     def generate(self, prompt):
         return "OK"
@@ -59,7 +61,7 @@ class FakeGemini:
 
     def ground(self, prompt):
         return GroundedAnswer(
-            "Today", ("date today",), (Source("a", "u", "a.com"),), (), self.model
+            "Headlines", self.searches, (Source("a", "u", "a.com"),), (), self.grounding_model
         )
 
 
@@ -71,6 +73,27 @@ def test_live_checks_report_each_api(settings):
     assert "1 Google search" in checks["Grounding"].detail
     assert checks["Autocomplete"].status == "ok"
     assert gemini.cache is None  # live checks never answer from the cache
+
+
+def test_live_checks_report_each_step(settings):
+    steps: list[str] = []
+    live_checks(
+        settings, gemini=FakeGemini(), autocomplete=FakeAutocomplete(), on_step=steps.append
+    )
+    assert steps == [
+        "Gemini text (gemini-test)…",
+        "Gemini embeddings (gemini-embedding-test)…",
+        "Gemini grounding (gemini-grounding-test)…",
+        "Google autocomplete…",
+    ]
+
+
+def test_grounding_without_a_search_fails(settings):
+    gemini = FakeGemini()
+    gemini.searches = ()
+    checks = by_name(live_checks(settings, gemini=gemini, autocomplete=FakeAutocomplete()))
+    assert checks["Grounding"].status == "fail"
+    assert "without searching" in checks["Grounding"].detail
 
 
 def test_live_checks_show_failures_without_stopping(settings):
@@ -91,3 +114,12 @@ def test_live_checks_without_key_skip_gemini(settings):
     checks = by_name(live_checks(settings, autocomplete=FakeAutocomplete()))
     assert checks["Connection"].status == "off"
     assert "Text" not in checks
+
+
+def test_database_check(settings, project):
+    assert by_name(config_checks(settings))["Database"].status == "ok"
+    missing = Settings(
+        _env_file=None, project_dir=project, database_url="postgresql+psycopg:///no_such_db_xyz"
+    )
+    check = by_name(config_checks(missing))["Database"]
+    assert check.status == "fail" and "seo db setup" in check.detail

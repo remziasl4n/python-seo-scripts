@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import Any, Literal
 
 from seo_toolkit.core.config import ConfigError, Settings, load_site
+from seo_toolkit.core.db import is_ready
 from seo_toolkit.core.errors import ToolkitError
 
 Status = Literal["ok", "warn", "fail", "off"]
@@ -76,6 +77,9 @@ def config_checks(settings: Settings, site_name: str | None = None) -> list[Chec
         else:
             checks.append(Check("Site", "Semantic context", "ok", site.central_entity))
 
+    ready, detail = is_ready(settings)
+    checks.append(Check("Settings", "Database", "ok" if ready else "fail", detail))
+
     for setting, label, unlocks in KEYS:
         value = getattr(settings, setting)
         if value is None:
@@ -96,18 +100,39 @@ def _attempt(area: str, name: str, call: Callable[[], str]) -> Check:
         return Check(area, name, "fail", str(e))
 
 
+LIVE_TIMEOUT_SECONDS = 30
+
+
+def _no_step(message: str) -> None:
+    pass
+
+
 def live_checks(
-    settings: Settings, gemini: Any | None = None, autocomplete: Any | None = None
+    settings: Settings,
+    gemini: Any | None = None,
+    autocomplete: Any | None = None,
+    on_step: Callable[[str], None] = _no_step,
 ) -> list[Check]:
-    """Real calls to each configured API. `gemini` / `autocomplete` let tests pass fakes."""
+    """Real calls to each configured API, one attempt each, so a problem shows up fast.
+
+    `on_step` is told which check is running. `gemini` / `autocomplete` let tests pass fakes.
+    """
     from seo_toolkit.connectors.autocomplete import AutocompleteClient
-    from seo_toolkit.connectors.gemini import Gemini
+    from seo_toolkit.connectors.gemini import Gemini, GeminiError
 
     checks = []
     if gemini is None and settings.gemini_api_key is None:
         checks.append(Check("Gemini", "Connection", "off", "Add GEMINI_API_KEY to test Gemini."))
     else:
-        gemini = gemini or Gemini.from_settings(settings)
+        try:
+            gemini = gemini or Gemini.from_settings(
+                settings, max_attempts=1, timeout_seconds=LIVE_TIMEOUT_SECONDS
+            )
+        except ToolkitError as e:
+            checks.append(Check("Gemini", "Connection", "fail", str(e)))
+            gemini = None
+
+    if gemini is not None:
         gemini.cache = None  # a live check must reach the API
 
         def text() -> str:
@@ -119,14 +144,21 @@ def live_checks(
             return f"{gemini.embedding_model}: {vectors.shape[1]} dimensions"
 
         def grounding() -> str:
-            answer = gemini.ground("What is the date today?")
+            # A question only a search can answer, so the check proves searching works
+            answer = gemini.ground("What are today's top news headlines? One line.")
+            if not answer.search_queries:
+                raise GeminiError(f"{gemini.grounding_model} answered without searching Google.")
             return (
-                f"Ran {len(answer.search_queries)} Google search(es), {len(answer.sources)} sources"
+                f"{gemini.grounding_model} ran {len(answer.search_queries)} Google search(es), "
+                f"{len(answer.sources)} sources"
             )
 
+        on_step(f"Gemini text ({gemini.model})…")
         checks.append(_attempt("Gemini", "Text", text))
+        on_step(f"Gemini embeddings ({gemini.embedding_model})…")
         checks.append(_attempt("Gemini", "Embeddings", embedding))
         if settings.gemini_grounding:
+            on_step(f"Gemini grounding ({gemini.grounding_model})…")
             checks.append(_attempt("Gemini", "Grounding", grounding))
         else:
             checks.append(Check("Gemini", "Grounding", "off", "GEMINI_GROUNDING=false"))
@@ -137,5 +169,6 @@ def live_checks(
     def suggest() -> str:
         return f"{len(client.suggest('swimming pool'))} suggestions for “swimming pool”"
 
+    on_step("Google autocomplete…")
     checks.append(_attempt("Google", "Autocomplete", suggest))
     return checks

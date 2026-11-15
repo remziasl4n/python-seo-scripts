@@ -3,6 +3,7 @@
 import hashlib
 from typing import Any
 
+import httpx
 import numpy as np
 import pytest
 from google.genai import errors, types
@@ -56,8 +57,16 @@ def fake_vector(text: str, dims: int) -> list[float]:
     ).tolist()  # deliberately not unit length
 
 
-def api_error(cls: type[errors.APIError], code: int, message: str) -> errors.APIError:
-    return cls(code, {"error": {"code": code, "message": message, "status": "X"}})
+def api_error(
+    cls: type[errors.APIError], code: int, message: str, retry_delay: str | None = None
+) -> errors.APIError:
+    """An SDK error. `retry_delay` (e.g. "7s") adds the RetryInfo Google sends on rate limits."""
+    error: dict[str, Any] = {"code": code, "message": message, "status": "X"}
+    if retry_delay is not None:
+        error["details"] = [
+            {"@type": "type.googleapis.com/google.rpc.RetryInfo", "retryDelay": retry_delay}
+        ]
+    return cls(code, {"error": error})
 
 
 class FakeModels:
@@ -296,14 +305,64 @@ def test_titles_only_for_documents(gemini):
 # --- errors and retries -----------------------------------------------------------------
 
 
-def test_retries_overload_then_succeeds(gemini, client):
+def test_retries_overload_and_rate_limits_then_succeeds(gemini, client):
     client.models.responses += [
         api_error(errors.ServerError, 503, "overloaded"),
-        api_error(errors.ClientError, 429, "slow down"),
+        api_error(errors.ClientError, 429, "slow down", retry_delay="2s"),
         text_response("ok"),
     ]
     assert gemini.generate("x") == "ok"
     assert len(client.models.generate_calls) == 3
+
+
+def test_waits_as_long_as_google_asks(client):
+    sleeps: list[float] = []
+    gemini = Gemini(client, model="m", embedding_model="e")
+    gemini._retrying.sleep = sleeps.append  # record waits instead of sleeping
+    client.models.responses += [
+        api_error(errors.ClientError, 429, "slow down", retry_delay="7s"),
+        text_response("ok"),
+    ]
+    gemini.generate("x")
+    assert sleeps == [7.0]
+
+
+def test_quota_without_retry_delay_fails_at_once(gemini, client):
+    client.models.responses.append(api_error(errors.ClientError, 429, "exceeded your quota"))
+    with pytest.raises(GeminiError, match="no quota for text on gemini-test"):
+        gemini.generate("x")
+    assert len(client.models.generate_calls) == 1
+
+
+def test_grounding_quota_points_to_grounding_model(gemini, client):
+    client.models.responses.append(api_error(errors.ClientError, 429, "exceeded your quota"))
+    with pytest.raises(GeminiError, match=r"GEMINI_GROUNDING_MODEL=gemini-2\.5-flash"):
+        gemini.ground("q")
+
+
+def test_overload_names_the_setting_to_change(gemini, client):
+    client.models.embed_errors = [api_error(errors.ServerError, 503, "busy")] * 5
+    with pytest.raises(GeminiError, match="GEMINI_EMBEDDING_MODEL"):
+        gemini.embed(["x"])
+
+
+def test_timeouts_are_retried_then_explained(gemini, client):
+    client.models.responses += [httpx.ReadTimeout("slow")] * 5
+    gemini.timeout_seconds = 30
+    with pytest.raises(GeminiError, match="didn't answer within 30s"):
+        gemini.generate("x")
+    assert len(client.models.generate_calls) == 5
+
+
+def test_grounding_uses_its_own_model(gemini, client):
+    gemini.grounding_model = "gemini-grounding"
+    client.models.responses += [grounded_response(), grounded_response()]
+    answer = gemini.ground("q")
+    assert client.models.generate_calls[0]["model"] == "gemini-grounding"
+    assert answer.model == "gemini-grounding"
+    gemini.grounding_model = "gemini-other"
+    gemini.ground("q")  # a different model is a different cache entry
+    assert len(client.models.generate_calls) == 2
 
 
 def test_gives_up_after_max_attempts(gemini, client):
@@ -328,6 +387,18 @@ def test_client_errors_explain_what_to_check(gemini, client, code, hint):
 def test_from_settings_needs_a_key(settings):
     with pytest.raises(ConfigError, match="GEMINI_API_KEY"):
         Gemini.from_settings(settings)
+
+
+def test_from_settings_grounding_model_and_timeout(project):
+    from seo_toolkit.core.config import Settings
+
+    base = {"_env_file": None, "project_dir": project, "gemini_api_key": "k", "gemini_model": "m"}
+    assert Gemini.from_settings(Settings(**base)).grounding_model == "m"  # defaults to text model
+    gemini = Gemini.from_settings(
+        Settings(**base, gemini_grounding_model="g", gemini_timeout_seconds=12)
+    )
+    assert (gemini.grounding_model, gemini.timeout_seconds) == ("g", 12)
+    assert Gemini.from_settings(Settings(**base), timeout_seconds=5).timeout_seconds == 5
 
 
 def test_from_settings_reads_models(project):

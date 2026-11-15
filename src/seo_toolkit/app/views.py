@@ -134,11 +134,16 @@ def setup() -> None:
     st.subheader("Live connection test")
     st.caption(
         "Makes one small real call to each configured API: one Gemini reply, one embedding, "
-        "one grounded search (of 5,000 free a month) and one autocomplete request."
+        "one grounded search and one autocomplete request. Each gets one try, up to 30 seconds."
     )
     if st.button("Test connections", type="primary"):
-        with st.spinner("Calling the APIs…"):
-            st.session_state["live_checks"] = live_checks(settings)
+        with st.status("Calling the APIs…") as status:
+
+            def show_step(step: str) -> None:
+                status.update(label=f"Testing {step}")
+
+            st.session_state["live_checks"] = live_checks(settings, on_step=show_step)
+            status.update(label="Done", state="complete")
     if "live_checks" in st.session_state:
         _checks_table(st.session_state["live_checks"])
 
