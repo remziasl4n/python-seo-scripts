@@ -2,16 +2,25 @@
 
 Semantic SEO research and planning tools you run on your own computer, from a local dashboard or the command line.
 
-The tools follow the principles in [docs/semantic-seo-principles.md](docs/semantic-seo-principles.md): how Google reads, groups and ranks content, and how the semantic SEO framework turns that into plans.
+The tools follow the principles in [docs/semantic-seo-principles.md](docs/semantic-seo-principles.md): how Google reads, groups and ranks content, and how the semantic SEO framework turns that into plans. How the code fits together, and the stack, are in [docs/architecture.md](docs/architecture.md).
 
 ## Quick start
 
-You need [uv](https://docs.astral.sh/uv/) (`brew install uv`). It installs the right Python version for you.
+You need [uv](https://docs.astral.sh/uv/) and Postgres:
+
+```bash
+brew install uv postgresql@17 pgvector
+brew services start postgresql@17   # runs in the background from now on
+```
+
+Then:
 
 ```bash
 uv sync                      # install everything
 cp .env.example .env         # then add your keys (all optional to start)
+uv run seo db setup          # create the database and its tables (safe to repeat)
 uv run seo app               # open the dashboard at http://localhost:8501
+uv run seo api               # or start the web app's API: http://localhost:8000/api/docs
 ```
 
 The dashboard only accepts connections from your own computer.
@@ -67,7 +76,7 @@ The module docstring becomes the tool's "How it works" text. The tool then appea
 ## Development
 
 ```bash
-uv run pytest                 # tests (no API calls, no keys needed)
+uv run pytest                 # tests: no API calls or keys; needs Postgres running (uses a throwaway database)
 uv run ruff check src tests   # lint
 uv run mypy src               # types
 ```
