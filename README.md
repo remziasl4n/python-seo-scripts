@@ -6,10 +6,10 @@ The tools follow the principles in [docs/semantic-seo-principles.md](docs/semant
 
 ## Quick start
 
-You need [uv](https://docs.astral.sh/uv/) and Postgres:
+You need [uv](https://docs.astral.sh/uv/), Postgres and Node.js:
 
 ```bash
-brew install uv postgresql@17 pgvector
+brew install uv postgresql@17 pgvector node
 brew services start postgresql@17   # runs in the background from now on
 ```
 
@@ -19,29 +19,26 @@ Then:
 uv sync                      # install everything
 cp .env.example .env         # then add your keys (all optional to start)
 uv run seo db setup          # create the database and its tables (safe to repeat)
-uv run seo app               # open the dashboard at http://localhost:8501
-uv run seo api               # or start the web app's API: http://localhost:8000/api/docs
+uv run seo dev               # start the app: http://localhost:3000
 ```
 
-The dashboard only accepts connections from your own computer.
+`seo dev` starts the API and the web app together (the first run also installs the web app's packages); Ctrl+C stops both. Both only accept connections from your own computer.
 
-**Setting up your site:**
-1. Copy `config/sites/example.yaml` to `config/sites/<your-site>.yaml`.
-2. Fill it in: domain, source context, central entity, sections, brand terms, competitors.
-3. Set `SEO_SITE=<your-site>` in `.env`, or pick the site in the dashboard's sidebar.
+`uv run seo app` does the same.
 
-Your site files and `.env` are gitignored.
+**Setting up your site:** open **Sites → New site** in the web app and fill in the domain, source context, central entity, sections, brand terms and competitors. The new site is selected straight away. Sites are stored in the database; **Export YAML** on a site's page saves a copy, and any YAML files in `config/sites/` are imported by `uv run seo db setup` (your own site files there are gitignored, like `.env`).
 
-## The dashboard
+## The web app
 
 | Page | What it's for |
 |---|---|
-| **Home** | Your site's semantic context, and which tools are ready to run |
+| **Overview** | Your site's semantic context, which tools are ready, recent runs, and anything in Setup that needs attention |
+| **One page per tool** | A form built from the tool's inputs, a "How it works" explanation, live progress, and the results: sortable, filterable, resizable, downloadable as CSV or Excel |
+| **Runs** | Every run, filterable by tool, status and site |
+| **Sites** | Create, edit, export and delete sites |
 | **Setup** | What's configured, what each key unlocks, and a live test of each API |
-| **Results** | Every saved run, to view or download |
-| **One page per tool** | A form for its inputs, a "How it works" explanation, and the results table |
 
-Every run is saved to `data/outputs/<tool>/`. API responses are cached in `.cache/`, so a rerun is instant and free. Switch on **Ignore cache** in the sidebar to fetch fresh data.
+Runs happen in the background, so you can leave the page and come back; the run's address (`?run=…`) always shows it again. Every run is saved to `data/outputs/<tool>/` and recorded in the database. API responses are cached in `.cache/`, so a rerun is instant and free; tick **Ignore cache** to fetch fresh data. Pick the site to run against in the sidebar.
 
 ## The command line
 
@@ -79,4 +76,12 @@ The module docstring becomes the tool's "How it works" text. The tool then appea
 uv run pytest                 # tests: no API calls or keys; needs Postgres running (uses a throwaway database)
 uv run ruff check src tests   # lint
 uv run mypy src               # types
+
+cd web
+corepack pnpm test            # front-end unit tests
+corepack pnpm typecheck       # TypeScript
+corepack pnpm e2e             # browser tests in your installed Chrome (own database and ports)
+corepack pnpm gen:api         # regenerate the API types after changing the Python API
 ```
+
+A Python test fails if the API changed without `gen:api`, so the front end's types can't drift from the API.

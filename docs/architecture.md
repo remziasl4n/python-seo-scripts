@@ -40,7 +40,7 @@ Browser ──► Next.js app (web/)  ──/api──►  FastAPI (src/seo_tool
 
 ## Decisions that keep the SaaS path open
 
-1. **Every user-data table has `workspace_id`.** Locally it's `"local"`. A hosted version takes it from the signed-in user's organisation. Queries always filter by it (see `RunManager`).
+1. **Every user-data table has `workspace_id`.** That's `runs` and `sites` so far. Locally it's `"local"`; a hosted version takes it from the signed-in user's organisation. Queries always filter by it (see `RunManager` and `core/sites.py`). Sites live in the database and are edited in the web app, because a SaaS user can't edit files on a server. YAML is kept for import (`seo db setup`) and export.
 2. **The same database everywhere.** Postgres locally and in production, so there's one set of behaviour to test. The tests create a throwaway database per session.
 3. **Anything that changes when hosted sits behind one small interface:** job running (`RunManager`), file storage, cache (`core/cache.py`), and secrets (`.env` now, encrypted per-workspace keys later).
 4. **Tools stay pure.** No database, web or auth code inside a tool.
@@ -65,10 +65,19 @@ The tests apply every migration to their throwaway database, so a broken migrati
 ## Running locally
 
 ```bash
-brew install postgresql@17 pgvector && brew services start postgresql@17   # once
+brew install postgresql@17 pgvector node && brew services start postgresql@17   # once
 uv sync
 uv run seo db setup      # creates the database and tables; safe to repeat
-uv run seo api           # http://localhost:8000/api/docs
+uv run seo dev           # API on :8000 (docs at /api/docs) + web app on :3000
 ```
 
 Everything listens on localhost only: the API can spend your Gemini quota.
+
+## The web app
+
+- **Routing:** `web/src/app/` holds Next.js App Router pages. The browser only talks to the Next.js server, which passes `/api/*` through to the Python API (`next.config.ts`), so there's no CORS to manage. In production the same rewrite points at the hosted API.
+- **Types:** `src/lib/api/schema.d.ts` is generated from the API's OpenAPI schema (`pnpm gen:api`). A Python test compares the committed schema with the live one, so they can't drift.
+- **Data:** `src/lib/queries.ts` holds all data fetching (TanStack Query), including polling a run every 500 ms until it finishes.
+- **Forms:** `src/lib/schema-form.ts` turns a tool's input JSON Schema into form fields. Pure functions, unit-tested against the real schemas.
+- **Tests:** `pnpm e2e` drives your installed Chrome against a real API and web server, on separate ports with a separate `seo_toolkit_e2e` database.
+- **Packages:** pnpm, pinned in `package.json` (`packageManager`) and run through corepack, so no global install is needed.
