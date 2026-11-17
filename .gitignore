@@ -19,6 +19,15 @@ data/**/*
 !data/**/.gitkeep
 .cache/
 
+# --- Web app (Next.js) -------------------------------------------------------
+web/node_modules/
+web/.next/
+web/.next-e2e/
+web/next-env.d.ts
+web/*.tsbuildinfo
+web/test-results/
+web/playwright-report/
+
 # --- Python ------------------------------------------------------------------
 __pycache__/
 *.py[cod]

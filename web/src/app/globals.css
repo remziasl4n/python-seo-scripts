@@ -1,0 +1,111 @@
+@import "tailwindcss";
+
+/* Dark mode follows the `dark` class next-themes puts on <html> */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Data-dense analyst look: neutral greys, one accent, compact type */
+:root {
+  --background: #ffffff;
+  --surface: #f7f8fa;
+  --surface-2: #eef0f3;
+  --border: #e2e5ea;
+  --border-strong: #cdd2d9;
+  --foreground: #15181d;
+  --muted: #687080;
+  --accent: #2563eb;
+  --accent-soft: #e8efff;
+  --ok: #15803d;
+  --ok-soft: #e7f6ec;
+  --warn: #b45309;
+  --warn-soft: #fdf3e2;
+  --bad: #c62828;
+  --bad-soft: #fdecec;
+}
+
+.dark {
+  --background: #0e1014;
+  --surface: #14171c;
+  --surface-2: #1b1f26;
+  --border: #252a32;
+  --border-strong: #343a44;
+  --foreground: #e5e8ec;
+  --muted: #8c94a3;
+  --accent: #5b93ff;
+  --accent-soft: #17233a;
+  --ok: #4ade80;
+  --ok-soft: #12261a;
+  --warn: #fbbf24;
+  --warn-soft: #2a2110;
+  --bad: #f87171;
+  --bad-soft: #2c1517;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-ok: var(--ok);
+  --color-ok-soft: var(--ok-soft);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-bad: var(--bad);
+  --color-bad-soft: var(--bad-soft);
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Inter, Roboto, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+html {
+  color-scheme: light;
+}
+html.dark {
+  color-scheme: dark;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Numbers line up in columns */
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Markdown from tool descriptions */
+.prose-tool p {
+  margin: 0.4rem 0;
+}
+.prose-tool ul,
+.prose-tool ol {
+  margin: 0.4rem 0;
+  padding-left: 1.1rem;
+}
+.prose-tool ul {
+  list-style: disc;
+}
+.prose-tool ol {
+  list-style: decimal;
+}
+.prose-tool li {
+  margin: 0.15rem 0;
+}
+.prose-tool strong {
+  font-weight: 600;
+}
+.prose-tool code {
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+  background: var(--surface-2);
+  padding: 0 0.25rem;
+  border-radius: 3px;
+}
