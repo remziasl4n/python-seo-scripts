@@ -41,7 +41,8 @@ from pydantic import BaseModel
 from seo_toolkit.connectors.autocomplete import AutocompleteClient
 from seo_toolkit.connectors.gemini import Gemini
 from seo_toolkit.core import output
-from seo_toolkit.core.config import ConfigError, Settings, SiteConfig, get_settings, load_site
+from seo_toolkit.core.config import ConfigError, Settings, SiteConfig, get_settings
+from seo_toolkit.core.sites import load_site
 
 # Tool groups in the order the dashboard shows them
 GROUPS: dict[str, str] = {

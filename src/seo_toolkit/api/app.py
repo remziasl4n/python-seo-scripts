@@ -2,43 +2,52 @@
 
 Endpoints (all under /api):
 
-    GET  /health                         is the server up
-    GET  /sites                          site files, and which is the default
-    GET  /sites/{name}                   one site's settings
-    GET  /tools                          every tool, grouped, with whether it's ready
-    GET  /tools/{group}/{name}           one tool: description and input JSON Schema
-    POST /runs                           start a run          {tool_id, inputs, site?, refresh?}
-    GET  /runs                           run history, newest first   ?tool_id=&limit=
-    GET  /runs/{id}                      one run: status, progress, metrics, notes, error
-    GET  /runs/{id}/rows                 the results table as columns + rows
-    GET  /runs/{id}/download             the results file   ?format=csv|xlsx
-    GET  /setup                          setup checks for a site      ?site=
-    POST /setup/live                     one real call to each configured API
+    GET    /health                       is the server up
+    GET    /sites                        every site, and which is the default
+    POST   /sites                        create a site                 (a SiteConfig)
+    GET    /sites/{name}                 one site's settings
+    PUT    /sites/{name}                 replace a site's settings     (a SiteConfig)
+    DELETE /sites/{name}                 delete a site (its runs stay in the history)
+    GET    /sites/{name}/export          the site as a YAML file
+    GET    /tools                        every tool, grouped, with whether it's ready
+    GET    /tools/{group}/{name}         one tool: description and input JSON Schema
+    POST   /runs                         start a run        {tool_id, inputs, site?, refresh?}
+    GET    /runs                         run history, newest first
+                                         ?tool_id=&status=&site=&limit=&offset=
+    GET    /runs/{id}                    one run: status, progress, metrics, notes, error
+    GET    /runs/{id}/rows               the results table as columns + rows
+    GET    /runs/{id}/download           the results file   ?format=csv|xlsx
+    GET    /setup                        setup checks for a site      ?site=
+    POST   /setup/live                   one real call to each configured API
 
-Problems a user can fix (missing key, bad site file) come back as 400 with a plain
-`detail` message. Invalid tool inputs come back as 422 with one error per field.
+Problems a user can fix (missing key, unknown site) come back as 400 with a plain
+`detail` message; a missing site or run is 404; a duplicate site name is 409. Every
+invalid request (tool inputs, site settings) is 422 with one error per field:
+{"detail": "...", "errors": [{"field": "sections.0.role", "label": "...", "message": "..."}]}.
 """
 
 from __future__ import annotations
 
 import io
 import json
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from contextlib import asynccontextmanager
 from typing import Annotated, Any, Literal
 
 import pandas as pd
 from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel, ValidationError
 
 from seo_toolkit import __version__
+from seo_toolkit.core import sites as site_store
 from seo_toolkit.core.checks import Check, config_checks, live_checks
-from seo_toolkit.core.config import ConfigError, Settings, get_settings, load_site
+from seo_toolkit.core.config import ConfigError, Settings, SiteConfig, get_settings
 from seo_toolkit.core.db import DatabaseError
 from seo_toolkit.core.errors import ToolkitError
-from seo_toolkit.core.runs import RunManager, RunRecord
+from seo_toolkit.core.runs import RunManager, RunRecord, Status
 from seo_toolkit.tools.base import GROUPS, Tool, discover
 
 ROW_LIMIT = 50_000  # more than this and the browser table would struggle; download instead
@@ -121,16 +130,39 @@ def _column_type(series: pd.Series) -> Literal["number", "boolean", "string"]:
     return "string"
 
 
-def _field_errors(error: ValidationError, model: type[BaseModel]) -> list[FieldError]:
-    errors = []
-    for e in error.errors():
-        name = str(e["loc"][0]) if e["loc"] else ""
-        field = model.model_fields.get(name)
-        label = field.title if field and field.title else name.replace("_", " ").capitalize()
-        errors.append(
-            FieldError(field=name, label=label, message=e["msg"].removeprefix("Value error, "))
-        )
-    return errors
+def _humanize(name: str) -> str:
+    return name.replace("_", " ").capitalize()
+
+
+def _field_errors(
+    errors: Sequence[Mapping[str, Any]], model: type[BaseModel] | None
+) -> list[FieldError]:
+    """Pydantic errors as {field, label, message}. `field` is a dotted path, e.g.
+    "sections.0.role"; `label` names it the way the form does, e.g. "Sections, row 1: Role".
+    """
+    result = []
+    for e in errors:
+        parts = [str(p) for p in e["loc"]]
+        if parts and parts[0] in ("body", "query", "path"):  # where in the request, not a field
+            parts = parts[1:]
+        if not parts:
+            continue
+        field = model.model_fields.get(parts[0]) if model else None
+        label = field.title if field and field.title else _humanize(parts[0])
+        if len(parts) >= 2 and parts[1].isdigit():
+            label += f", row {int(parts[1]) + 1}"
+            if len(parts) > 2:
+                label += f": {_humanize(parts[2])}"
+        message = str(e["msg"]).removeprefix("Value error, ")
+        result.append(FieldError(field=".".join(parts), label=label, message=message))
+    return result
+
+
+def _invalid(errors: list[FieldError]) -> JSONResponse:
+    return JSONResponse(
+        status_code=422,
+        content={"detail": "Some fields need fixing.", "errors": [e.model_dump() for e in errors]},
+    )
 
 
 def create_app(
@@ -142,6 +174,7 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        runs.recover()  # fails here, with the fix in the message, if Postgres is down
         yield
         runs.shutdown()
 
@@ -168,6 +201,21 @@ def create_app(
     async def database_error(request: Request, error: DatabaseError) -> JSONResponse:
         return JSONResponse(status_code=503, content={"detail": str(error)})
 
+    @app.exception_handler(site_store.SiteNotFound)
+    async def site_not_found(request: Request, error: site_store.SiteNotFound) -> JSONResponse:
+        # Asking for a site that isn't there is a 404; *using* one (e.g. in a run) is a 400
+        status = 404 if request.url.path.startswith("/api/sites") else 400
+        return JSONResponse(status_code=status, content={"detail": str(error)})
+
+    @app.exception_handler(site_store.SiteExists)
+    async def site_exists(request: Request, error: site_store.SiteExists) -> JSONResponse:
+        return JSONResponse(status_code=409, content={"detail": str(error)})
+
+    @app.exception_handler(RequestValidationError)
+    async def invalid_request(request: Request, error: RequestValidationError) -> JSONResponse:
+        model = SiteConfig if request.url.path.startswith("/api/sites") else None
+        return _invalid(_field_errors(error.errors(), model))
+
     def tool_or_404(tool_id: str) -> type[Tool]:
         tools = discover()
         if tool_id not in tools:
@@ -192,23 +240,39 @@ def create_app(
     @app.get("/api/sites")
     def list_sites() -> Sites:
         current = settings()
-        sites = []
-        for path in sorted(current.sites_dir.glob("*.yaml")):
-            try:
-                site = load_site(path.stem, current)
-            except ConfigError:
-                continue  # an invalid file shows up as a failed check on the Setup page
-            sites.append(SiteSummary(**site.model_dump(include=set(SiteSummary.model_fields))))
+        sites = site_store.list_sites(current, runs.workspace_id)
         names = [s.name for s in sites]
         default = current.seo_site if current.seo_site in names else (names[0] if names else "")
-        return Sites(default=default, sites=sites)
+        summaries = [
+            SiteSummary(**s.model_dump(include=set(SiteSummary.model_fields))) for s in sites
+        ]
+        return Sites(default=default, sites=summaries)
+
+    @app.post("/api/sites", status_code=201)
+    def create_site(site: SiteConfig) -> SiteConfig:
+        return site_store.create_site(settings(), site, runs.workspace_id)
 
     @app.get("/api/sites/{name}")
-    def get_site(name: str) -> dict[str, Any]:
-        current = settings()
-        if not (current.sites_dir / f"{name}.yaml").is_file():
-            raise HTTPException(404, f"No site file config/sites/{name}.yaml.")
-        return load_site(name, current).model_dump()
+    def get_site(name: str) -> SiteConfig:
+        return site_store.load_site(name, settings(), runs.workspace_id)
+
+    @app.put("/api/sites/{name}")
+    def update_site(name: str, site: SiteConfig) -> SiteConfig:
+        return site_store.update_site(settings(), name, site, runs.workspace_id)
+
+    @app.delete("/api/sites/{name}", status_code=204)
+    def delete_site(name: str) -> Response:
+        site_store.delete_site(settings(), name, runs.workspace_id)
+        return Response(status_code=204)
+
+    @app.get("/api/sites/{name}/export")
+    def export_site(name: str) -> Response:
+        site = site_store.load_site(name, settings(), runs.workspace_id)
+        return Response(
+            site_store.site_to_yaml(site),
+            media_type="application/yaml",
+            headers={"Content-Disposition": f'attachment; filename="{name}.yaml"'},
+        )
 
     # --- Tools ----------------------------------------------------------------------
 
@@ -228,27 +292,25 @@ def create_app(
 
     # --- Runs -----------------------------------------------------------------------
 
-    @app.post("/api/runs", status_code=202, response_model=None)
+    # A returned JSONResponse (the 422) bypasses response_model; RunRecord types the 202
+    @app.post("/api/runs", status_code=202, response_model=RunRecord)
     def start_run(body: StartRun) -> RunRecord | JSONResponse:
         tool = tool_or_404(body.tool_id)
         try:
             inputs = tool.Inputs.model_validate(body.inputs)
         except ValidationError as e:
-            errors = _field_errors(e, tool.Inputs)
-            return JSONResponse(
-                status_code=422,
-                content={
-                    "detail": "Some inputs need fixing.",
-                    "errors": [err.model_dump() for err in errors],
-                },
-            )
+            return _invalid(_field_errors(e.errors(), tool.Inputs))
         return runs.start(tool, inputs, site=body.site, refresh=body.refresh)
 
     @app.get("/api/runs")
     def list_runs(
-        tool_id: str | None = None, limit: Annotated[int, Query(ge=1, le=500)] = 50
+        tool_id: str | None = None,
+        status: Status | None = None,
+        site: str | None = None,
+        limit: Annotated[int, Query(ge=1, le=500)] = 50,
+        offset: Annotated[int, Query(ge=0)] = 0,
     ) -> list[RunRecord]:
-        return runs.list(tool_id=tool_id, limit=limit)
+        return runs.list(tool_id=tool_id, status=status, site=site, limit=limit, offset=offset)
 
     @app.get("/api/runs/{run_id}")
     def get_run(run_id: str) -> RunRecord:

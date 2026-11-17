@@ -4,7 +4,8 @@ from fakes import FakeAutocomplete
 from seo_toolkit.connectors.autocomplete import AutocompleteError
 from seo_toolkit.connectors.gemini import GeminiError, GroundedAnswer, Source
 from seo_toolkit.core.checks import config_checks, live_checks
-from seo_toolkit.core.config import Settings
+from seo_toolkit.core.config import Settings, SiteConfig
+from seo_toolkit.core.sites import create_site
 
 
 def by_name(checks):
@@ -14,18 +15,18 @@ def by_name(checks):
 def test_fresh_project_warns_but_does_not_fail(settings):
     checks = by_name(config_checks(settings))
     assert checks[".env file"].status == "warn"
-    assert checks["Site file"].status == "ok"
+    assert checks["Site"].status == "ok"
     assert checks["Your own site"].status == "warn"
     assert checks["GEMINI_API_KEY"].status == "off"
     assert not any(c.status == "fail" for c in checks.values())
 
 
 def test_missing_site_fails(settings):
-    assert by_name(config_checks(settings, "nope"))["Site file"].status == "fail"
+    assert by_name(config_checks(settings, "nope"))["Site"].status == "fail"
 
 
 def test_empty_semantic_context_warns(settings):
-    (settings.sites_dir / "bare.yaml").write_text("name: bare\ndomain: https://bare.com/\n")
+    create_site(settings, SiteConfig(name="bare", domain="https://bare.com/"))
     check = by_name(config_checks(settings, "bare"))["Semantic context"]
     assert check.status == "warn"
     assert "source_context" in check.detail
@@ -123,3 +124,12 @@ def test_database_check(settings, project):
     )
     check = by_name(config_checks(missing))["Database"]
     assert check.status == "fail" and "seo db setup" in check.detail
+
+
+def test_site_check_waits_for_the_database(project):
+    down = Settings(
+        _env_file=None, project_dir=project, database_url="postgresql+psycopg://localhost:1/x"
+    )
+    checks = by_name(config_checks(down))
+    assert checks["Database"].status == "fail"
+    assert checks["Site"].status == "off"

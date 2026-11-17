@@ -1,7 +1,11 @@
 """Command-line entry point: `uv run seo --help`."""
 
+import json
+import os
+import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Annotated, Any, get_origin
 
@@ -31,16 +35,6 @@ def version() -> None:
     typer.echo(f"seo-toolkit {__version__}")
 
 
-@app.command("app")
-def run_app(port: Annotated[int, typer.Option(help="Port to serve on.")] = 8501) -> None:
-    """Open the dashboard in your browser (http://localhost:8501)."""
-    script = Path(__file__).parent / "app" / "main.py"
-    command = [sys.executable, "-m", "streamlit", "run", str(script), "--server.port", str(port)]
-    # Only this computer can open it: the app can spend your API quota
-    command += ["--server.address", "localhost", "--browser.gatherUsageStats", "false"]
-    raise typer.Exit(subprocess.call(command))
-
-
 @app.command("api")
 def run_api(
     port: Annotated[int, typer.Option(help="Port to serve on.")] = 8000,
@@ -67,25 +61,100 @@ def run_api(
     )
 
 
+@app.command("openapi")
+def openapi_schema(
+    output_file: Annotated[Path, typer.Argument(help="Where to write the JSON schema.")],
+) -> None:
+    """Write the API's OpenAPI schema. The web app generates its TypeScript types from it."""
+    from seo_toolkit.api.app import create_app
+
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+    output_file.write_text(json.dumps(create_app().openapi(), indent=2) + "\n")
+    console.print(f"Wrote {output_file}")
+
+
+@app.command("dev")
+def dev(
+    api_port: Annotated[int, typer.Option(help="Port for the API.")] = 8000,
+    web_port: Annotated[int, typer.Option(help="Port for the web app.")] = 3000,
+) -> None:
+    """Start the API and the web app together: http://localhost:3000. Ctrl+C stops both."""
+    from seo_toolkit.core.db import is_ready
+
+    settings = get_settings()
+    web = settings.project_dir / "web"
+    ready, detail = is_ready(settings)
+    if not ready:
+        console.print(f"[red]{detail}[/red]")
+        raise typer.Exit(1)
+    if shutil.which("corepack") is None:
+        console.print("[red]Node.js isn't installed. Install it with: brew install node[/red]")
+        raise typer.Exit(1)
+    pnpm = ["corepack", "pnpm"]
+    # corepack fetches the pnpm version pinned in web/package.json without asking
+    node_env = {**os.environ, "COREPACK_ENABLE_DOWNLOAD_PROMPT": "0"}
+    if not (web / "node_modules").is_dir():
+        console.print("Installing the web app's packages (first run only)…")
+        if subprocess.call([*pnpm, "install"], cwd=web, env=node_env) != 0:
+            raise typer.Exit(1)
+
+    api = subprocess.Popen(
+        [sys.executable, "-m", "seo_toolkit.cli", "api", "--port", str(api_port)]
+    )
+    web_env = {**node_env, "PORT": str(web_port), "SEO_API_URL": f"http://127.0.0.1:{api_port}"}
+    site = subprocess.Popen([*pnpm, "dev"], cwd=web, env=web_env)
+    console.print(f"\n[bold]Open http://localhost:{web_port}[/bold]  (Ctrl+C stops both)\n")
+    try:
+        while api.poll() is None and site.poll() is None:  # stop both if either stops
+            time.sleep(0.5)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        for process in (site, api):
+            if process.poll() is None:
+                process.terminate()
+        for process in (site, api):
+            try:
+                process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                process.kill()
+
+
+@app.command("app")
+def run_app(
+    api_port: Annotated[int, typer.Option(help="Port for the API.")] = 8000,
+    web_port: Annotated[int, typer.Option(help="Port for the web app.")] = 3000,
+) -> None:
+    """Open the web app (http://localhost:3000). The same as `seo dev`."""
+    dev(api_port=api_port, web_port=web_port)
+
+
 db_app = typer.Typer(help="Set up and update the database.", no_args_is_help=True)
 app.add_typer(db_app, name="db")
 
 
 @db_app.command("setup")
 def db_setup() -> None:
-    """Create the database if needed, bring its tables up to date, import old run files."""
+    """Create the database if needed, bring its tables up to date, and import
+    config/sites/*.yaml and old run files. Safe to repeat: nothing is imported twice."""
     from seo_toolkit.core.db import setup_database
     from seo_toolkit.core.runs import import_run_files
+    from seo_toolkit.core.sites import import_site_files
 
     settings = get_settings()
     try:
         created = setup_database(settings)
+        sites, problems = import_site_files(settings)
         imported = import_run_files(settings)
     except ToolkitError as e:
         console.print(f"[red]{e}[/red]")
         raise typer.Exit(1) from e
     name = settings.database_url.rsplit("/", 1)[-1]
     console.print(f"{'Created' if created else 'Found'} database {name}; tables are up to date.")
+    if sites:
+        console.print(f"Imported site(s) from config/sites/: {', '.join(sites)}.")
+    for problem in problems:
+        console.print(f"[yellow]Skipped: {problem}[/yellow]")
     if imported:
         console.print(f"Imported {imported} earlier run(s) from data/runs/.")
 

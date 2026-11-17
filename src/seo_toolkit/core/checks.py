@@ -11,9 +11,10 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from seo_toolkit.core.config import ConfigError, Settings, load_site
+from seo_toolkit.core.config import Settings
 from seo_toolkit.core.db import is_ready
 from seo_toolkit.core.errors import ToolkitError
+from seo_toolkit.core.sites import load_site
 
 Status = Literal["ok", "warn", "fail", "off"]
 ICONS: dict[str, str] = {"ok": "✅", "warn": "⚠️", "fail": "❌", "off": "⚪"}
@@ -48,37 +49,41 @@ def config_checks(settings: Settings, site_name: str | None = None) -> list[Chec
             Check("Settings", ".env file", "warn", "Not found. Run `cp .env.example .env`.")
         )
 
-    try:
-        site = load_site(site_name, settings)
-    except ConfigError as e:
-        checks.append(Check("Site", "Site file", "fail", str(e)))
-    else:
-        checks.append(Check("Site", "Site file", "ok", f"{site.name}: {site.domain}"))
-        if site.name == "example":
-            checks.append(
-                Check(
-                    "Site",
-                    "Your own site",
-                    "warn",
-                    "Using the example site. Copy config/sites/example.yaml to "
-                    "config/sites/<your-site>.yaml and set SEO_SITE in .env.",
-                )
-            )
-        empty = [f for f in ("source_context", "central_entity") if not getattr(site, f).strip()]
-        if empty:
-            checks.append(
-                Check(
-                    "Site",
-                    "Semantic context",
-                    "warn",
-                    f"{', '.join(empty)} empty: planning tools need them.",
-                )
-            )
-        else:
-            checks.append(Check("Site", "Semantic context", "ok", site.central_entity))
-
     ready, detail = is_ready(settings)
     checks.append(Check("Settings", "Database", "ok" if ready else "fail", detail))
+
+    if not ready:
+        checks.append(Check("Site", "Site", "off", "Needs the database."))
+    else:
+        try:
+            site = load_site(site_name, settings)
+        except ToolkitError as e:
+            checks.append(Check("Site", "Site", "fail", str(e)))
+        else:
+            checks.append(Check("Site", "Site", "ok", f"{site.name}: {site.domain}"))
+            if site.name == "example":
+                checks.append(
+                    Check(
+                        "Site",
+                        "Your own site",
+                        "warn",
+                        "Using the example site. Add your own on the Sites page.",
+                    )
+                )
+            empty = [
+                f for f in ("source_context", "central_entity") if not getattr(site, f).strip()
+            ]
+            if empty:
+                checks.append(
+                    Check(
+                        "Site",
+                        "Semantic context",
+                        "warn",
+                        f"{', '.join(empty)} empty: planning tools need them.",
+                    )
+                )
+            else:
+                checks.append(Check("Site", "Semantic context", "ok", site.central_entity))
 
     for setting, label, unlocks in KEYS:
         value = getattr(settings, setting)

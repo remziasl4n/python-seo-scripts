@@ -1,6 +1,7 @@
 """The web app's API, through FastAPI's test client (no server, no network)."""
 
 import io
+import json
 
 import pandas as pd
 import pytest
@@ -44,12 +45,88 @@ def test_health(client):
     assert client.get("/api/health").json()["status"] == "ok"
 
 
+ACME = {
+    "name": "acme",
+    "domain": "https://acme.com/",
+    "central_entity": "anvil",
+    "sections": [{"path": "/anvils/", "name": "Anvils", "role": "core"}],
+    "brand_terms": ["acme"],
+}
+
+
 def test_sites(client):
     body = client.get("/api/sites").json()
     assert body["default"] == "example"
     assert body["sites"][0]["central_entity"] == "swimming pool"
     assert client.get("/api/sites/example").json()["sections"][0]["role"] == "core"
     assert client.get("/api/sites/nope").status_code == 404
+
+
+def test_site_create_update_export_delete(client):
+    created = client.post("/api/sites", json=ACME)
+    assert created.status_code == 201
+    assert created.json()["country"] == "us"  # defaults filled in
+    assert [s["name"] for s in client.get("/api/sites").json()["sites"]] == ["acme", "example"]
+
+    assert client.post("/api/sites", json=ACME).status_code == 409  # name taken
+
+    updated = client.put("/api/sites/acme", json={**ACME, "central_entity": "hammer"})
+    assert updated.status_code == 200
+    assert client.get("/api/sites/acme").json()["central_entity"] == "hammer"
+    renamed = client.put("/api/sites/acme", json={**ACME, "name": "acme-2"})
+    assert renamed.status_code == 400 and "can't be changed" in renamed.json()["detail"]
+
+    export = client.get("/api/sites/acme/export")
+    assert "attachment" in export.headers["content-disposition"]
+    assert "central_entity: hammer" in export.text
+
+    assert client.delete("/api/sites/acme").status_code == 204
+    assert client.get("/api/sites/acme").status_code == 404
+    assert client.delete("/api/sites/acme").status_code == 404
+
+
+def test_site_validation_errors_name_each_field(client):
+    bad = {**ACME, "domain": "acme.com", "sections": [{"path": "anvils", "name": "A", "role": "x"}]}
+    response = client.post("/api/sites", json=bad)
+    assert response.status_code == 422
+    errors = {e["field"]: e for e in response.json()["errors"]}
+    assert errors["domain"]["label"] == "Domain"
+    assert "full URL" in errors["domain"]["message"]
+    assert errors["sections.0.path"]["label"] == "Sections, row 1: Path"
+    assert errors["sections.0.role"]["label"] == "Sections, row 1: Role"
+
+
+def test_running_against_a_missing_site_is_400(client):
+    response = client.post(
+        "/api/runs",
+        json={"tool_id": "research/autocomplete", "inputs": {"seeds": ["x"]}, "site": "ghost"},
+    )
+    assert response.status_code == 400
+    assert "no site called 'ghost'" in response.json()["detail"]
+
+
+def test_run_history_filters(client, manager):
+    finished(client, manager, start_autocomplete(client))
+    client.post("/api/sites", json=ACME)
+    other = client.post(
+        "/api/runs",
+        json={
+            "tool_id": "research/autocomplete",
+            "inputs": {"seeds": ["x"], "expand": "seed only"},
+            "site": "acme",
+        },
+    )
+    finished(client, manager, other)
+
+    def ids(**params):
+        return [r["site"] for r in client.get("/api/runs", params=params).json()]
+
+    assert ids() == ["acme", "example"]
+    assert ids(site="acme") == ["acme"]
+    assert ids(status="done") == ["acme", "example"]
+    assert ids(status="failed") == []
+    assert ids(limit=1, offset=1) == ["example"]
+    assert client.get("/api/runs", params={"status": "nonsense"}).status_code == 422
 
 
 def test_tools_list_says_what_is_ready(client):
@@ -95,7 +172,7 @@ def test_invalid_inputs_come_back_per_field(client):
     )
     assert response.status_code == 422
     body = response.json()
-    assert body["detail"] == "Some inputs need fixing."
+    assert body["detail"] == "Some fields need fixing."
     assert body["errors"][0]["field"] == "seeds"
     assert body["errors"][0]["label"] == "Seed queries"
 
@@ -110,7 +187,7 @@ def test_setup_problems_are_400_with_a_plain_message(client):
         "/api/runs",
         json={"tool_id": "research/autocomplete", "inputs": {"seeds": ["x"]}, "site": "nope"},
     )
-    assert response.status_code == 400 and "No site file" in response.json()["detail"]
+    assert response.status_code == 400 and "no site called" in response.json()["detail"]
 
 
 def test_unknown_things_are_404(client):
@@ -128,7 +205,7 @@ def test_rows_without_a_results_file_are_409(client, manager, settings):
 
 def test_setup_checks(client):
     checks = {c["name"]: c for c in client.get("/api/setup").json()}
-    assert checks["Site file"]["status"] == "ok"
+    assert checks["Site"]["status"] == "ok"
     assert checks["GEMINI_API_KEY"]["status"] == "off"
 
 
@@ -138,14 +215,33 @@ def test_database_down_is_503_with_the_fix(project, settings):
     )
     from seo_toolkit.core.db import DatabaseError
 
-    with pytest.raises(DatabaseError, match="brew services start"):
-        RunManager(lambda: down, context_factory=fake_context)  # refuses to start without it
+    # The server refuses to start without it
+    broken = create_app(lambda: down, RunManager(lambda: down, context_factory=fake_context))
+    with pytest.raises(DatabaseError, match="brew services start"), TestClient(broken):
+        pass
 
+    # ...and if it goes away while running, requests get a 503 with the fix
     working = RunManager(lambda: settings, context_factory=fake_context)
-    app = create_app(lambda: down, working)
-    working._settings = lambda: down  # the database goes away after startup
-    with TestClient(app) as client:
+    with TestClient(create_app(lambda: down, working)) as client:
+        working._settings = lambda: down
         response = client.get("/api/runs")
     assert response.status_code == 503
     assert "brew services start postgresql@17" in response.json()["detail"]
-    working.shutdown()
+
+
+def test_app_can_be_built_without_a_database(project):
+    """`seo openapi` builds the app just to read its schema: that mustn't need Postgres."""
+    down = Settings(
+        _env_file=None, project_dir=project, database_url="postgresql+psycopg://localhost:1/x"
+    )
+    schema = create_app(lambda: down).openapi()
+    assert "/api/runs" in schema["paths"]
+
+
+def test_committed_openapi_schema_is_up_to_date():
+    """web/src/lib/api/openapi.json drives the front end's types. Regenerate it with
+    `cd web && pnpm gen:api` after changing the API."""
+    from conftest import REPO
+
+    committed = json.loads((REPO / "web/src/lib/api/openapi.json").read_text())
+    assert committed == create_app().openapi(), "Run: cd web && pnpm gen:api"

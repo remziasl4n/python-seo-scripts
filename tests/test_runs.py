@@ -5,12 +5,13 @@ import pytest
 from pydantic import BaseModel
 
 from fakes import FakeAutocomplete
-from seo_toolkit.core.config import ConfigError, Settings, load_site
+from seo_toolkit.core.config import ConfigError, Settings
 from seo_toolkit.core.db import Run as RunRow
 from seo_toolkit.core.db import Workspace as WorkspaceRow
 from seo_toolkit.core.db import session
 from seo_toolkit.core.errors import ToolkitError
 from seo_toolkit.core.runs import RunManager, RunRecord, import_run_files
+from seo_toolkit.core.sites import load_site
 from seo_toolkit.tools.base import RunContext, Tool, ToolResult
 from seo_toolkit.tools.research.autocomplete import Autocomplete
 from seo_toolkit.tools.research.query_fanout import QueryFanout
@@ -123,7 +124,7 @@ def test_progress_is_visible_while_running(manager):
 def test_setup_errors_raise_before_queueing(manager):
     with pytest.raises(ConfigError, match="GEMINI_API_KEY"):
         manager.start(QueryFanout, QueryFanout.Inputs(query="pool cost"))
-    with pytest.raises(ConfigError, match="No site file"):
+    with pytest.raises(ConfigError, match="no site called"):
         manager.start(Autocomplete, autocomplete_inputs(), site="nope")
     assert manager.list() == []
 
@@ -161,7 +162,9 @@ def test_unfinished_runs_are_marked_interrupted_on_restart(settings, manager):
     GATE.release.clear()
     run = manager.start(BlockingTool, NoInputs())
     GATE.reached.wait(5)
-    restarted = RunManager(lambda: settings, context_factory=fake_context)  # reads the same files
+    restarted = RunManager(lambda: settings, context_factory=fake_context)
+    assert restarted.get(run.id).status == "running"  # creating a manager changes nothing
+    restarted.recover()  # what a starting server does
     record = restarted.get(run.id)
     assert record is not None and record.status == "failed"
     assert record.error is not None and "Interrupted" in record.error

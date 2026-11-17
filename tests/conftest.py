@@ -8,6 +8,7 @@ from sqlalchemy import create_engine, text
 
 from seo_toolkit.core import db
 from seo_toolkit.core.config import Settings, reload_settings
+from seo_toolkit.core.sites import import_site_files
 
 REPO = Path(__file__).resolve().parents[1]
 ENV_PREFIXES = (
@@ -45,10 +46,11 @@ def database_url() -> Iterator[str]:
 
 @pytest.fixture
 def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, database_url: str) -> Iterator[Path]:
-    """An empty project folder with the example site file, set as the current directory.
+    """An empty project folder, set as the current directory, with a fresh test database.
 
     Clears any real settings from the environment so tests never see your keys, points
-    DATABASE_URL at the test database, and empties its runs table.
+    DATABASE_URL at the test database, empties it, and imports the example site, the
+    same way `seo db setup` does for a new install.
     """
     (tmp_path / "pyproject.toml").write_text("[project]\nname = 'test'\n")
     sites = tmp_path / "config" / "sites"
@@ -60,7 +62,9 @@ def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, database_url: str) 
             monkeypatch.delenv(var)
     monkeypatch.setenv("DATABASE_URL", database_url)
     with db.get_engine(database_url).begin() as connection:
-        connection.execute(text("TRUNCATE runs"))
+        connection.execute(text("TRUNCATE runs, sites"))
+        connection.execute(text("DELETE FROM workspaces WHERE id <> 'local'"))
+    import_site_files(Settings(_env_file=None, project_dir=tmp_path))  # type: ignore[call-arg]
     monkeypatch.chdir(tmp_path)
     reload_settings()
     yield tmp_path

@@ -89,6 +89,33 @@ class Run(Base):
     output: Mapped[str | None] = mapped_column(Text)  # results file, relative to the project
 
 
+class Site(Base):
+    """A website tools run against. Columns mirror SiteConfig (core/config.py)."""
+
+    __tablename__ = "sites"
+
+    workspace_id: Mapped[str] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="CASCADE"), primary_key=True
+    )
+    name: Mapped[str] = mapped_column(String(64), primary_key=True)
+    domain: Mapped[str] = mapped_column(Text)
+    country: Mapped[str] = mapped_column(String(2))
+    language: Mapped[str] = mapped_column(String(2))
+    source_context: Mapped[str] = mapped_column(Text)
+    central_entity: Mapped[str] = mapped_column(Text)
+    entity_type: Mapped[str] = mapped_column(Text)
+    sections: Mapped[list[dict[str, Any]]] = mapped_column(JSONB)
+    brand_terms: Mapped[list[str]] = mapped_column(JSONB)
+    competitors: Mapped[list[str]] = mapped_column(JSONB)
+    gsc_property: Mapped[str] = mapped_column(Text)
+    ga4_property_id: Mapped[str] = mapped_column(Text)
+    sitemaps: Mapped[list[str]] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
 # --- Connections ---------------------------------------------------------------------
 
 

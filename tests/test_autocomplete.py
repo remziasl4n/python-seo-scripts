@@ -7,7 +7,7 @@ from pydantic import ValidationError
 from fakes import FakeAutocomplete
 from seo_toolkit.connectors.autocomplete import URL, AutocompleteClient, AutocompleteError
 from seo_toolkit.core.cache import Cache
-from seo_toolkit.core.config import load_site
+from seo_toolkit.core.sites import load_site
 from seo_toolkit.tools.base import RunContext
 from seo_toolkit.tools.research.autocomplete import Autocomplete, AutocompleteInputs, variations
 

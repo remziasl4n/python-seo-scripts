@@ -3,7 +3,8 @@ import pytest
 from pydantic import BaseModel
 
 from fakes import FakeAutocomplete
-from seo_toolkit.core.config import ConfigError, Settings, load_site
+from seo_toolkit.core.config import ConfigError, Settings
+from seo_toolkit.core.sites import load_site
 from seo_toolkit.tools.base import RunContext, Tool, ToolResult, discover, execute, get_tool
 from seo_toolkit.tools.research.autocomplete import Autocomplete
 

@@ -51,7 +51,11 @@ def _now() -> datetime:
 class RunRecord(BaseModel):
     """A run as the API and the web app see it."""
 
-    model_config = ConfigDict(from_attributes=True)
+    # Every field is always present in API responses, so the generated TypeScript
+    # types shouldn't mark fields with defaults (like created_at) as optional
+    model_config = ConfigDict(
+        from_attributes=True, json_schema_serialization_defaults_required=True
+    )
 
     id: str
     workspace_id: str = LOCAL_WORKSPACE
@@ -93,13 +97,15 @@ class RunManager:
         context_factory: ContextFactory = _default_context,
         workspace_id: str = LOCAL_WORKSPACE,
     ) -> None:
-        """`settings` is called for every run, so .env changes apply without a restart."""
+        """`settings` is called for every run, so .env changes apply without a restart.
+
+        Creating a manager doesn't touch the database; call `recover()` when a server starts.
+        """
         self._settings = settings
         self._context_factory = context_factory
         self.workspace_id = workspace_id
         self._executor = ThreadPoolExecutor(max_workers, thread_name_prefix="seo-run")
         self._futures: dict[str, Future[None]] = {}
-        self._mark_interrupted()
 
     # --- Storage --------------------------------------------------------------------
 
@@ -107,8 +113,8 @@ class RunManager:
         with session(self._settings()) as s:
             s.execute(update(Run).where(Run.id == run_id).values(**changes))
 
-    def _mark_interrupted(self) -> None:
-        """Runs still queued or running belonged to a server that stopped.
+    def recover(self) -> None:
+        """Mark runs still queued or running as interrupted: they belonged to a stopped server.
 
         Fine while one API process runs everything. With separate workers this moves to
         a heartbeat check, so one process can't mark another's runs as interrupted.
@@ -213,14 +219,25 @@ class RunManager:
             )
             return RunRecord.model_validate(row) if row else None
 
-    def list(self, tool_id: str | None = None, limit: int = 50) -> list[RunRecord]:
-        """Newest first."""
+    def list(
+        self,
+        tool_id: str | None = None,
+        status: Status | None = None,
+        site: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[RunRecord]:
+        """Newest first, optionally filtered. `offset` skips that many for paging."""
         query = select(Run).where(Run.workspace_id == self.workspace_id)
         if tool_id is not None:
             query = query.where(Run.tool_id == tool_id)
+        if status is not None:
+            query = query.where(Run.status == status)
+        if site is not None:
+            query = query.where(Run.site == site)
+        query = query.order_by(Run.created_at.desc(), Run.id.desc()).limit(limit).offset(offset)
         with session(self._settings()) as s:
-            rows = s.scalars(query.order_by(Run.created_at.desc(), Run.id.desc()).limit(limit))
-            return [RunRecord.model_validate(row) for row in rows]
+            return [RunRecord.model_validate(row) for row in s.scalars(query)]
 
     def output_path(self, run_id: str) -> Path | None:
         record = self.get(run_id)

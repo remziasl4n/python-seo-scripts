@@ -2,8 +2,9 @@ import pytest
 from pydantic import ValidationError
 
 from fakes import DictAutocomplete, FakeGemini
-from seo_toolkit.core.config import load_site
+from seo_toolkit.core.config import SiteConfig
 from seo_toolkit.core.prompts import PromptError, render
+from seo_toolkit.core.sites import create_site, load_site
 from seo_toolkit.tools.base import RunContext, discover
 from seo_toolkit.tools.research.query_fanout import (
     QueryFanout,
@@ -175,7 +176,7 @@ def test_grounding_turned_off_in_settings_adds_note(ctx, gemini):
 
 
 def test_missing_source_context_adds_note(settings, gemini, autocomplete):
-    (settings.sites_dir / "bare.yaml").write_text("name: bare\ndomain: https://bare.com/\n")
+    create_site(settings, SiteConfig(name="bare", domain="https://bare.com/"))
     ctx = RunContext(
         settings,
         load_site("bare", settings),

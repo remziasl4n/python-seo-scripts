@@ -37,8 +37,6 @@ dependencies = [
     "sqlalchemy>=2.1",
     "alembic>=1.20",
     "psycopg[binary]>=3.3",
-    # Local dashboard (`uv run seo app`), until the Next.js app replaces it
-    "streamlit>=1.66,<1.67",
     # CLI, config, utils
     "typer>=0.12",
     "rich>=13.8",
@@ -70,9 +68,7 @@ dev = [
     "mypy>=1.11",
     "pandas-stubs>=2.2",
     "types-pyyaml>=6.0",
-    "pre-commit>=3.8",
-    "watchdog>=6.0,<7",  # fast dashboard reload while editing code
-    "jupyterlab>=4.2",
+    "pre-commit>=3.8",    "jupyterlab>=4.2",
     "ipykernel>=6.29",
 ]
 

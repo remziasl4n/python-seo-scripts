@@ -2,27 +2,17 @@ import os
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
-from seo_toolkit.core.config import ConfigError, Settings, get_settings, load_site
+from seo_toolkit.core.config import ConfigError, Settings, SiteConfig, get_settings, load_site_file
 
-
-def write_site(settings: Settings, name: str, text: str) -> None:
-    (settings.sites_dir / f"{name}.yaml").write_text(text)
-
-
-def test_example_site_loads(settings):
-    site = load_site("example", settings)
-    assert site.central_entity == "swimming pool"
-    assert [s.role for s in site.sections] == ["core", "core", "outer"]
-    assert site.ga4_property_id == ""
+REPO = Path(__file__).resolve().parents[1]
 
 
-def test_default_site_comes_from_env(settings, monkeypatch):
-    monkeypatch.setenv("SEO_SITE", "example")
-    assert (
-        load_site(settings=Settings(_env_file=None, project_dir=settings.project_dir)).name
-        == "example"
-    )
+def write_site(settings: Settings, name: str, text: str) -> Path:
+    path = settings.sites_dir / f"{name}.yaml"
+    path.write_text(text)
+    return path
 
 
 def test_dotenv_values_and_empty_means_unset(project):
@@ -44,7 +34,7 @@ def test_require_names_the_env_variable(settings):
 
 
 def test_saving_env_is_picked_up_without_restart(project):
-    """A running dashboard must see a key added to .env after it started."""
+    """A running server must see a key added to .env after it started."""
     env = project / ".env"
     env.write_text("GEMINI_API_KEY=\n")
     assert get_settings().gemini_api_key is None
@@ -60,8 +50,7 @@ def test_saving_env_is_picked_up_without_restart(project):
 
 def test_env_example_loads_as_copied(project):
     """`cp .env.example .env` must give working settings: every value arrives as text."""
-    repo = Path(__file__).resolve().parents[1]
-    (project / ".env").write_text((repo / ".env.example").read_text())
+    (project / ".env").write_text((REPO / ".env.example").read_text())
     settings = get_settings()
     assert settings.gemini_embedding_dimensions == 768
     assert settings.gemini_grounding is True
@@ -90,9 +79,15 @@ def test_project_root_found_from_subfolder(project, monkeypatch):
     assert get_settings().project_dir == project.resolve()
 
 
-def test_missing_site_lists_available(settings):
-    with pytest.raises(ConfigError, match="Available sites: example"):
-        load_site("nope", settings)
+# --- Site settings and site files ----------------------------------------------------
+
+
+def test_repo_example_site_file_is_valid():
+    """The committed example is imported into every new database, so it must load."""
+    site = load_site_file(REPO / "config" / "sites" / "example.yaml")
+    assert site.name == "example"
+    assert site.central_entity == "swimming pool"
+    assert [s.role for s in site.sections] == ["core", "core", "outer"]
 
 
 @pytest.mark.parametrize(
@@ -109,27 +104,34 @@ def test_missing_site_lists_available(settings):
             "sections.0.path",
         ),
         ("name: x\ndomain: https://x.com/\ncentral_entitty: pool\n", "central_entitty"),
+        ("name: Has Spaces\ndomain: https://x.com/\n", "name"),
     ],
 )
-def test_invalid_site_names_the_field(settings, yaml_text, field):
-    write_site(settings, "bad", yaml_text)
+def test_invalid_site_file_names_the_field(settings, yaml_text, field):
+    path = write_site(settings, "bad", yaml_text)
     with pytest.raises(ConfigError, match=rf"- {field}:"):
-        load_site("bad", settings)
+        load_site_file(path)
 
 
 def test_broken_yaml_is_reported(settings):
-    write_site(settings, "bad", "name: [unclosed\n")
     with pytest.raises(ConfigError, match="not valid YAML"):
-        load_site("bad", settings)
+        load_site_file(write_site(settings, "bad", "name: [unclosed\n"))
 
 
 def test_numeric_ga4_id_becomes_text(settings):
-    write_site(settings, "num", "name: n\ndomain: https://n.com/\nga4_property_id: 123456789\n")
-    assert load_site("num", settings).ga4_property_id == "123456789"
+    path = write_site(
+        settings, "num", "name: n\ndomain: https://n.com/\nga4_property_id: 123456789\n"
+    )
+    assert load_site_file(path).ga4_property_id == "123456789"
 
 
-def test_is_brand(settings):
-    site = load_site("example", settings)
+def test_blank_list_lines_are_dropped():
+    site = SiteConfig(name="x", domain="https://x.com/", brand_terms=[" acme ", "", "  "])
+    assert site.brand_terms == ["acme"]
+
+
+def test_is_brand():
+    site = SiteConfig(name="x", domain="https://x.com/", brand_terms=["acme pools", "acmepools"])
     assert site.is_brand("Acme Pools reviews")
     assert site.is_brand("acmepools.com login")
     assert not site.is_brand("pool cost texas")
@@ -138,30 +140,24 @@ def test_is_brand(settings):
 @pytest.mark.parametrize(
     ("url", "expected"),
     [
-        ("https://www.example.com/pools/fiberglass/", "/pools/"),
+        ("https://www.example.com/guides/cost/inground/", "/guides/cost/"),  # most specific wins
         ("/guides/opening-a-pool/", "/guides/"),
         ("https://www.example.com/about/", None),
     ],
 )
-def test_section_for(settings, url, expected):
-    section = load_site("example", settings).section_for(url)
+def test_section_for(url, expected):
+    site = SiteConfig(
+        name="x",
+        domain="https://x.com/",
+        sections=[
+            {"path": "/guides/", "name": "Guides", "role": "outer"},
+            {"path": "/guides/cost/", "name": "Cost guides", "role": "core"},
+        ],
+    )
+    section = site.section_for(url)
     assert (section.path if section else None) == expected
 
 
-def test_section_for_prefers_most_specific(settings):
-    write_site(
-        settings,
-        "nested",
-        "name: n\ndomain: https://n.com/\nsections:\n"
-        "  - {path: /guides/, name: Guides, role: outer}\n"
-        "  - {path: /guides/cost/, name: Cost guides, role: core}\n",
-    )
-    section = load_site("nested", settings).section_for("/guides/cost/inground/")
-    assert section is not None and section.role == "core"
-
-
-def test_repo_example_site_is_valid():
-    """The committed example must always load, since users copy it."""
-    repo = Path(__file__).resolve().parents[1]
-    settings = Settings(_env_file=None, project_dir=repo)
-    assert load_site("example", settings).domain.startswith("https://")
+def test_site_name_must_be_url_safe():
+    with pytest.raises(ValidationError):
+        SiteConfig(name="../etc", domain="https://x.com/")

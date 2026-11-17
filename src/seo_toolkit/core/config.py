@@ -1,10 +1,10 @@
-"""Settings from .env, and per-site config from config/sites/<name>.yaml.
+"""Settings from .env, and the shape of a site's settings.
 
 .env holds secrets and machine settings (see .env.example). Everything about a
-website lives in its site file (see config/sites/example.yaml).
+website is a SiteConfig, stored in the database (core/sites.py) and edited on the
+web app's Sites page. YAML files in config/sites/ can be imported and exported.
 
     settings = get_settings()
-    site = load_site()            # the site named by SEO_SITE
     key = settings.require("gemini_api_key")
 """
 
@@ -167,7 +167,8 @@ def reload_settings() -> None:
     _load_settings.cache_clear()
 
 
-# --- Site files --------------------------------------------------------------------
+# --- Sites -------------------------------------------------------------------------
+# Sites live in the database (see core/sites.py). YAML files are for import and export.
 
 
 class Section(BaseModel):
@@ -175,9 +176,12 @@ class Section(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    path: str
-    name: str
-    role: Literal["core", "outer"]
+    path: str = Field(title="Path", description="URL path prefix, e.g. /blog/")
+    name: str = Field(title="Name", min_length=1)
+    role: Literal["core", "outer"] = Field(
+        title="Role",
+        description="core: the central entity's main attribute; outer: supporting topics",
+    )
 
     @field_validator("path")
     @classmethod
@@ -188,26 +192,47 @@ class Section(BaseModel):
 
 
 class SiteConfig(BaseModel):
-    """One website's settings, from config/sites/<name>.yaml."""
+    """One website's settings: who it's for, what it's about, and where its data is."""
 
-    model_config = ConfigDict(extra="forbid")  # a typo in the YAML is an error, not ignored
+    model_config = ConfigDict(extra="forbid")  # a typo in a YAML file is an error, not ignored
 
-    name: str
-    domain: str
-    country: str = "us"
-    language: str = "en"
+    name: str = Field(
+        title="Name",
+        description="Short id used in links and run history, e.g. acme-pools",
+        pattern=r"^[a-z0-9][a-z0-9-]{0,62}$",
+    )
+    domain: str = Field(title="Domain", description="Full URL, e.g. https://www.example.com/")
+    country: str = Field("us", title="Country", description="Two-letter code, e.g. us")
+    language: str = Field("en", title="Language", description="Two-letter code, e.g. en")
 
-    source_context: str = ""
-    central_entity: str = ""
-    entity_type: str = ""
-    sections: list[Section] = []
+    source_context: str = Field(
+        "",
+        title="Source context",
+        description="Why the site exists and how it makes money. Decides what to cover.",
+    )
+    central_entity: str = Field(
+        "", title="Central entity", description="The thing every section is about"
+    )
+    entity_type: str = Field("", title="Entity type", description="e.g. product, service, place")
+    sections: list[Section] = Field([], title="Sections")
 
-    brand_terms: list[str] = []
-    competitors: list[str] = []
+    brand_terms: list[str] = Field(
+        [], title="Brand terms", description="Words that mark a query as branded"
+    )
+    competitors: list[str] = Field([], title="Competitors", description="Competitor URLs")
 
-    gsc_property: str = ""
-    ga4_property_id: str = ""
-    sitemaps: list[str] = []
+    gsc_property: str = Field(
+        "",
+        title="Search Console property",
+        description="sc-domain:example.com, or the full URL prefix",
+    )
+    ga4_property_id: str = Field("", title="GA4 property ID", description="Numeric, optional")
+    sitemaps: list[str] = Field([], title="Sitemaps", description="Sitemap URLs")
+
+    @field_validator("brand_terms", "competitors", "sitemaps")
+    @classmethod
+    def _drop_blank_lines(cls, values: list[str]) -> list[str]:
+        return [v.strip() for v in values if v.strip()]
 
     @field_validator("domain")
     @classmethod
@@ -241,20 +266,10 @@ class SiteConfig(BaseModel):
         return max(matches, key=lambda s: len(s.path), default=None)
 
 
-def load_site(name: str | None = None, settings: Settings | None = None) -> SiteConfig:
-    """Load config/sites/<name>.yaml. With no name, uses SEO_SITE from .env."""
-    settings = settings or get_settings()
-    name = name or settings.seo_site
-    path = settings.sites_dir / f"{name}.yaml"
-
+def load_site_file(path: Path) -> SiteConfig:
+    """Read and check one site YAML file (for import into the database)."""
     if not path.is_file():
-        available = sorted(p.stem for p in settings.sites_dir.glob("*.yaml"))
-        raise ConfigError(
-            f"No site file at {path}.\n"
-            f"Available sites: {', '.join(available) or 'none'}.\n"
-            f"To add one, copy config/sites/example.yaml to config/sites/{name}.yaml."
-        )
-
+        raise ConfigError(f"No site file at {path}.")
     try:
         data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     except yaml.YAMLError as e:
