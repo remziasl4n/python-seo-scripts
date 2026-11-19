@@ -1,22 +1,23 @@
-"""The searches Google's AI would run to answer a query, and which of them are real.
+"""The searches people (and Google's AI) run around a topic, and which of them are real.
 
 **How it works**
 
-1. **Generate.** Gemini writes queries for each fan-out type: *related*, *implicit*,
-   *comparative*, *reformulation*, *entity_expanded* (broader, narrower, part-of entities,
-   labelled with the lexical relation) and *template* (what is / how to / cost / vs …).
-   Your site's source context is in the prompt, so queries fit what the site is for.
-2. **Observe.** A grounded Gemini call answers the seed using Google Search and records
-   the searches it actually ran. Google says AI Mode works by "issuing multiple related
-   searches across subtopics", so these are real fan-out, not guesses.
-3. **Verify.** Each query is checked against Google autocomplete: *exact* means people
-   type that query; *prefix* means people type longer searches that start with it.
-4. **Flag rewordings.** Embeddings mark queries that are near-identical to a better-evidenced
-   one in **near_duplicate_of**. Nothing is deleted.
+1. **Suggest.** Gemini lists the searches someone researching your topic would also run,
+   in six kinds: *related topics*, *follow-up questions* (needs they didn't say out loud),
+   *comparisons*, *the same search in other words*, *broader or narrower* versions, and
+   *common questions* (what is, how to, cost, types of …). Your site's description is
+   included, so the searches fit what your site is for.
+2. **Watch Google's AI.** Gemini answers your search using Google Search, and records the
+   searches it actually ran. Google's AI answers work this way, so these are real.
+3. **Check autocomplete.** Each search is looked up in Google's autocomplete: an *exact
+   match* means people type it; *longer searches start with it* means people type longer
+   versions.
+4. **Spot rewordings.** Searches that mean the same as a better-supported one are marked
+   in **same_as**. Nothing is deleted.
 
-**Evidence** sorts the table: *observed* (Gemini really searched it, or it's an exact
-autocomplete match), *partial* (autocomplete prefix) and *model only* (Gemini's suggestion
-with no outside confirmation). See docs/semantic-seo-principles.md, sections 1.3 and 3.
+**Evidence** sorts the table: *confirmed* (Gemini really searched it, or people type it),
+*partly confirmed* (people type longer versions) and *Gemini only* (a suggestion nothing
+else backs up).
 
 The prompt is in src/seo_toolkit/prompts/research/query_fanout.md: edit it to change what's asked.
 """
@@ -24,13 +25,14 @@ The prompt is in src/seo_toolkit/prompts/research/query_fanout.md: edit it to ch
 from __future__ import annotations
 
 import re
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from typing import Literal
 
 import numpy as np
 import pandas as pd
 from pydantic import BaseModel, Field, field_validator
 
+from seo_toolkit.core import writing_rules as rules
 from seo_toolkit.core.prompts import render
 from seo_toolkit.tools.base import RunContext, Tool, ToolResult
 
@@ -41,8 +43,47 @@ Intent = Literal["informational", "commercial", "transactional", "navigational"]
 LexicalRelation = Literal[
     "none", "synonym", "hypernym", "hyponym", "meronym", "holonym", "related_entity"
 ]
-Evidence = Literal["observed", "partial", "model only"]
-EVIDENCE_ORDER: dict[str, int] = {"observed": 0, "partial": 1, "model only": 2}
+Evidence = Literal["confirmed", "partly confirmed", "Gemini only"]
+CONFIRMED: Evidence = "confirmed"
+PARTLY: Evidence = "partly confirmed"
+GEMINI_ONLY: Evidence = "Gemini only"
+EVIDENCE_ORDER: dict[str, int] = {CONFIRMED: 0, PARTLY: 1, GEMINI_ONLY: 2}
+# Runs saved before the plain-English labels
+LEGACY_EVIDENCE = {"observed": CONFIRMED, "partial": PARTLY, "model only": GEMINI_ONLY}
+
+# What the table shows instead of the internal names Gemini answers with
+KIND_LABELS = {
+    "related": "Related topic",
+    "implicit": "Follow-up question",
+    "comparative": "Comparison",
+    "reformulation": "Same search, other words",
+    "entity_expanded": "Broader or narrower",
+    "template": "Common question",
+    "observed search": "Google search by Gemini",
+}
+READER_WANTS = {
+    intent: rules.INTENTS[guide].label for intent, guide in rules.SEARCH_INTENTS.items()
+}
+RELATION_LABELS = {
+    "none": "",
+    "synonym": "Same meaning",
+    "hypernym": "Broader",
+    "hyponym": "Narrower",
+    "meronym": "A part of it",
+    "holonym": "What it's part of",
+    "related_entity": "Related",
+}
+AUTOCOMPLETE_LABELS = {
+    "exact": "Exact match",
+    "prefix": "Longer searches start with it",
+    "none": "No",
+    "not checked": "Not checked",
+}
+SOURCE_LABELS = {
+    "gemini": "Gemini",
+    "gemini-search": "Gemini's Google search",
+    "autocomplete": "Autocomplete",
+}
 
 # Cosine similarity above which two queries are flagged as rewordings of each other
 NEAR_DUPLICATE = 0.96
@@ -50,15 +91,15 @@ NEAR_DUPLICATE = 0.96
 COLUMNS = [
     "query",
     "evidence",
-    "fanout_type",
-    "intent",
-    "entity",
-    "attribute",
-    "lexical_relation",
+    "kind",
+    "reader_wants",
+    "topic",
+    "aspect",
+    "relation",
     "autocomplete",
-    "sources",
-    "near_duplicate_of",
-    "rationale",
+    "found_by",
+    "same_as",
+    "why",
 ]
 
 
@@ -79,16 +120,16 @@ class FanoutQueries(BaseModel):
 class QueryFanoutInputs(BaseModel):
     query: str = Field(
         min_length=2,
-        title="Seed query or entity",
+        title="Search or topic",
         description="E.g. 'inground pool cost' or 'fiberglass pool'.",
     )
     per_type: int = Field(
-        6, ge=2, le=15, title="Queries per fan-out type", description="Six types, so 6 → ~36."
+        6, ge=2, le=15, title="Searches per kind", description="Six kinds, so 6 gives about 36."
     )
     grounded: bool = Field(
         True,
-        title="Record Gemini's real searches",
-        description="One grounded call. Free for the first 5,000 searches a month.",
+        title="Record Gemini's real Google searches",
+        description="One Gemini answer using Google Search. The first 5,000 a month are free.",
     )
     check_autocomplete: bool = Field(
         True,
@@ -133,10 +174,23 @@ def autocomplete_match(query: str, suggestions: list[str]) -> str:
 
 def evidence_for(sources: set[str], autocomplete: str) -> Evidence:
     if "gemini-search" in sources or autocomplete == "exact":
-        return "observed"
+        return CONFIRMED
     if autocomplete == "prefix":
-        return "partial"
-    return "model only"
+        return PARTLY
+    return GEMINI_ONLY
+
+
+def plain_evidence(value: str) -> str:
+    """Evidence as the table shows it, including from runs saved with the older labels."""
+    return LEGACY_EVIDENCE.get(value, value)
+
+
+def grounding_system(country: str) -> str:
+    """The instruction for the grounded answer. Shared, so other tools reuse its cache."""
+    return (
+        f"Answer this search fully for someone in country {country}, "
+        "covering every subtopic they would need."
+    )
 
 
 def flag_near_duplicates(queries: list[str], vectors: np.ndarray) -> list[str]:
@@ -152,8 +206,8 @@ def flag_near_duplicates(queries: list[str], vectors: np.ndarray) -> list[str]:
 class QueryFanout(Tool):
     name = "query-fanout"
     group = "research"
-    title = "Query fan-out"
-    summary = "The searches Google's AI would run for a query, checked against real search data."
+    title = "Related searches"
+    summary = "The searches Google's AI runs to answer a query, checked against real search data."
     needs = ("gemini_api_key",)
     Inputs = QueryFanoutInputs
 
@@ -165,7 +219,7 @@ class QueryFanout(Tool):
         notes: list[str] = []
 
         # 1. Generate
-        ctx.progress(0.0, "Asking Gemini for fan-out queries…")
+        ctx.progress(0.0, "Asking Gemini for related searches…")
         prompt = render(
             "research/query_fanout",
             domain=site.domain,
@@ -180,7 +234,8 @@ class QueryFanout(Tool):
         generated = gemini.generate_json(prompt, FanoutQueries).queries
         if not site.source_context.strip():
             notes.append(
-                "The site has no source_context, so queries aren't tailored to its purpose."
+                "Your site has no description yet, so searches aren't tailored to what you "
+                "sell. Add one on the Sites page."
             )
 
         rows: dict[str, Row] = {}
@@ -191,14 +246,8 @@ class QueryFanout(Tool):
 
         # 2. Observe
         if inputs.grounded and gemini.grounding:
-            ctx.progress(0.2, "Answering with Google Search to record real searches…")
-            answer = gemini.ground(
-                inputs.query,
-                system=(
-                    f"Answer this search fully for someone in country {country}, "
-                    "covering every subtopic they would need."
-                ),
-            )
+            ctx.progress(0.2, "Answering with Google Search to record the real searches…")
+            answer = gemini.ground(inputs.query, system=grounding_system(country))
             for searched in answer.search_queries:
                 query = normalize(searched)
                 if query in rows:
@@ -207,7 +256,9 @@ class QueryFanout(Tool):
                     rows[query] = Row(query, "observed search", sources={"gemini-search"})
             domains = list(dict.fromkeys(s.domain for s in answer.sources if s.domain))
             if domains:
-                notes.append(f"Gemini's grounded answer cited: {', '.join(domains[:10])}.")
+                notes.append(
+                    f"Gemini's answer (using Google Search) cited: {', '.join(domains[:10])}."
+                )
         elif inputs.grounded:
             notes.append(
                 "Grounding is off (GEMINI_GROUNDING=false), so no real searches were recorded."
@@ -224,36 +275,46 @@ class QueryFanout(Tool):
                 if match != "none":
                     rows[query].sources.add("autocomplete")
 
-        records = [
-            {
-                **asdict(row),
-                "sources": ", ".join(sorted(row.sources)),
-                "evidence": evidence_for(row.sources, row.autocomplete),
-                "near_duplicate_of": "",
-            }
-            for row in rows.values()
-        ]
+        records = [self._record(row) for row in rows.values()]
         table = pd.DataFrame(records, columns=COLUMNS)
         table["_rank"] = table["evidence"].map(EVIDENCE_ORDER)
         table = (
-            table.sort_values(["_rank", "fanout_type"], kind="stable")
+            table.sort_values(["_rank", "kind"], kind="stable")
             .drop(columns="_rank")
             .reset_index(drop=True)
         )
 
-        # 4. Flag rewordings
-        ctx.progress(0.95, "Flagging near-identical rewordings…")
+        # 4. Spot rewordings
+        ctx.progress(0.95, "Spotting searches that mean the same thing…")
         if len(table) > 1:
             vectors = gemini.embed(table["query"].tolist(), task="similarity")
-            table["near_duplicate_of"] = flag_near_duplicates(table["query"].tolist(), vectors)
+            table["same_as"] = flag_near_duplicates(table["query"].tolist(), vectors)
         ctx.progress(1.0, "Done")
 
         counts = table["evidence"].value_counts()
+        searched = SOURCE_LABELS["gemini-search"]
         metrics: dict[str, int | float | str] = {
-            "Queries": len(table),
-            "Observed": int(counts.get("observed", 0)),
-            "Partial": int(counts.get("partial", 0)),
-            "Model only": int(counts.get("model only", 0)),
-            "Gemini searches": int((table["sources"].str.contains("gemini-search")).sum()),
+            "Searches": len(table),
+            "Confirmed": int(counts.get(CONFIRMED, 0)),
+            "Partly confirmed": int(counts.get(PARTLY, 0)),
+            "Gemini only": int(counts.get(GEMINI_ONLY, 0)),
+            "Google searches by Gemini": int(table["found_by"].str.contains(searched).sum()),
         }
         return ToolResult(table[COLUMNS], metrics, notes)
+
+    @staticmethod
+    def _record(row: Row) -> dict[str, str]:
+        """A row as the table shows it: plain labels instead of Gemini's internal names."""
+        return {
+            "query": row.query,
+            "evidence": evidence_for(row.sources, row.autocomplete),
+            "kind": KIND_LABELS.get(row.fanout_type, row.fanout_type),
+            "reader_wants": READER_WANTS.get(row.intent, ""),
+            "topic": row.entity,
+            "aspect": row.attribute,
+            "relation": RELATION_LABELS.get(row.lexical_relation, ""),
+            "autocomplete": AUTOCOMPLETE_LABELS[row.autocomplete],
+            "found_by": ", ".join(SOURCE_LABELS[s] for s in sorted(row.sources)),
+            "same_as": "",
+            "why": row.rationale,
+        }
