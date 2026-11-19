@@ -62,7 +62,7 @@ def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, database_url: str) 
             monkeypatch.delenv(var)
     monkeypatch.setenv("DATABASE_URL", database_url)
     with db.get_engine(database_url).begin() as connection:
-        connection.execute(text("TRUNCATE runs, sites"))
+        connection.execute(text("TRUNCATE runs, sites, documents"))
         connection.execute(text("DELETE FROM workspaces WHERE id <> 'local'"))
     import_site_files(Settings(_env_file=None, project_dir=tmp_path))  # type: ignore[call-arg]
     monkeypatch.chdir(tmp_path)

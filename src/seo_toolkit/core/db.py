@@ -87,6 +87,7 @@ class Run(Base):
     notes: Mapped[list[str]] = mapped_column(JSONB, default=list)
     row_count: Mapped[int | None]
     output: Mapped[str | None] = mapped_column(Text)  # results file, relative to the project
+    report: Mapped[str | None] = mapped_column(Text)  # Markdown write-up, relative to the project
 
 
 class Site(Base):
@@ -114,6 +115,32 @@ class Site(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+
+class Document(Base):
+    """A draft in the content editor: the page being written, and the brief it's scored on."""
+
+    __tablename__ = "documents"
+    __table_args__ = (Index("ix_documents_workspace_updated", "workspace_id", "updated_at"),)
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="CASCADE"), index=True
+    )
+    site: Mapped[str] = mapped_column(String(100))
+    keyword: Mapped[str] = mapped_column(Text)
+    name: Mapped[str] = mapped_column(Text)
+    brief_run_id: Mapped[str | None] = mapped_column(String(32))  # the content editor run
+    title: Mapped[str] = mapped_column(Text, default="")
+    meta_description: Mapped[str] = mapped_column(Text, default="")
+    url_slug: Mapped[str] = mapped_column(Text, default="")
+    content: Mapped[str] = mapped_column(Text, default="")  # HTML
+    answers: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB)  # last answer check
+    answers_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    score: Mapped[int | None]
+    word_count: Mapped[int] = mapped_column(default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 # --- Connections ---------------------------------------------------------------------
