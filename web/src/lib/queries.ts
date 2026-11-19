@@ -3,7 +3,16 @@
 /** Data hooks for every page. Polling and cache updates happen here, so pages stay simple. */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { api, type Run, type RunStatus, type SiteConfig, toApiError, unwrap } from "./api";
+import {
+  api,
+  type DocumentRecord,
+  type Draft,
+  type Run,
+  type RunStatus,
+  type SiteConfig,
+  toApiError,
+  unwrap,
+} from "./api";
 
 export const isActive = (run?: Pick<Run, "status">) =>
   run?.status === "queued" || run?.status === "running";
@@ -114,6 +123,20 @@ export function useRunRows(run: Run | undefined) {
   });
 }
 
+/** A finished run's written report (Markdown), e.g. a content plan. */
+export function useRunReport(run: Run | undefined) {
+  return useQuery({
+    queryKey: ["report", run?.id],
+    queryFn: async () => {
+      const response = await fetch(`/api/runs/${encodeURIComponent(run!.id)}/report`);
+      if (!response.ok) throw toApiError(response.status, await response.json().catch(() => null));
+      return response.text();
+    },
+    enabled: run?.status === "done" && Boolean(run.report),
+    staleTime: Infinity,
+  });
+}
+
 export function useStartRun() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -124,6 +147,118 @@ export function useStartRun() {
       refresh?: boolean;
     }) => unwrap(api.POST("/api/runs", { body: { refresh: false, ...body } })),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["runs"] }),
+  });
+}
+
+// --- Content editor ------------------------------------------------------------------
+
+export function useDocuments() {
+  return useQuery({
+    queryKey: ["documents"],
+    queryFn: () => unwrap(api.GET("/api/documents")),
+  });
+}
+
+export function useDocument(id: string) {
+  return useQuery({
+    queryKey: ["document", id],
+    queryFn: () => unwrap(api.GET("/api/documents/{doc_id}", { params: { path: { doc_id: id } } })),
+    staleTime: Infinity, // the editor holds the live copy; this is only the starting point
+  });
+}
+
+export function useCreateDocument() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { keyword: string; site?: string; pages: string[]; import_url?: string | null }) =>
+      unwrap(api.POST("/api/documents", { body })),
+    onSuccess: (doc) => {
+      queryClient.setQueryData(["document", doc.id], doc);
+      queryClient.invalidateQueries({ queryKey: ["documents"] });
+    },
+  });
+}
+
+export function useDeleteDocument() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const { error, response } = await api.DELETE("/api/documents/{doc_id}", {
+        params: { path: { doc_id: id } },
+      });
+      if (!response.ok) throw toApiError(response.status, error);
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["documents"] }),
+  });
+}
+
+/** Save the draft. The saved record isn't written back into the editor (it already has it). */
+export function useSaveDocument(id: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (draft: Draft) =>
+      unwrap(api.PUT("/api/documents/{doc_id}", { params: { path: { doc_id: id } }, body: draft })),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["documents"] }),
+  });
+}
+
+/** The draft's brief, polled while it's being built. */
+export function useBrief(id: string) {
+  return useQuery({
+    queryKey: ["brief", id],
+    queryFn: () =>
+      unwrap(api.GET("/api/documents/{doc_id}/brief", { params: { path: { doc_id: id } } })),
+    refetchInterval: (query) => (isActive(query.state.data?.run ?? undefined) ? 1000 : false),
+  });
+}
+
+export function useRebuildBrief(id: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (pages: string[]) =>
+      unwrap(
+        api.POST("/api/documents/{doc_id}/brief", {
+          params: { path: { doc_id: id } },
+          body: { pages },
+        }),
+      ),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["brief", id] }),
+  });
+}
+
+/**
+ * The live score for what's in the editor. `version` is the draft's fingerprint, so each
+ * version is scored once and the last score stays on screen while the next one loads.
+ */
+export function useScore(id: string, draft: Draft, version: string, ready: boolean) {
+  return useQuery({
+    queryKey: ["score", id, version],
+    queryFn: () =>
+      unwrap(
+        api.POST("/api/documents/{doc_id}/score", { params: { path: { doc_id: id } }, body: draft }),
+      ),
+    enabled: ready,
+    placeholderData: (previous) => previous,
+    staleTime: Infinity,
+  });
+}
+
+/** Ask Gemini whether each question is answered. Saves the draft too. */
+export function useCheckAnswers(id: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (draft: Draft) =>
+      unwrap(
+        api.POST("/api/documents/{doc_id}/check-answers", {
+          params: { path: { doc_id: id } },
+          body: draft,
+        }),
+      ),
+    onSuccess: (doc: DocumentRecord) => {
+      queryClient.invalidateQueries({ queryKey: ["score", id] });
+      queryClient.invalidateQueries({ queryKey: ["documents"] });
+      queryClient.setQueryData(["document", id], doc);
+    },
   });
 }
 

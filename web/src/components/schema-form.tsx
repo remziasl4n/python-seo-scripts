@@ -5,10 +5,41 @@ import { Play } from "lucide-react";
 import { type FormEvent, useMemo, useState } from "react";
 
 import type { FieldError } from "@/lib/api";
+import { formatWhen } from "@/lib/format";
+import { useRuns } from "@/lib/queries";
 import { fieldsFromSchema, type FormField, type FormValues, initialValues, toInputs } from "@/lib/schema-form";
 
+import { summarizeInputs } from "./runs-table";
 import { Button } from "./ui/button";
 import { Checkbox, Field, Input, Select, Textarea } from "./ui/field";
+
+/** A dropdown of finished runs to build on, newest first, limited to the given tools. */
+function RunPicker({
+  tools,
+  value,
+  onChange,
+  ...props
+}: {
+  id: string;
+  name: string;
+  disabled?: boolean;
+  tools?: string[];
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  const runs = useRuns({ status: "done", limit: 100 });
+  const usable = (runs.data ?? []).filter((run) => !tools || tools.includes(run.tool_id));
+  return (
+    <Select {...props} value={value} onChange={(e) => onChange(e.target.value)}>
+      <option value="">{usable.length ? "None" : "No finished runs yet"}</option>
+      {usable.map((run) => (
+        <option key={run.id} value={run.id}>
+          {run.tool_title}: {summarizeInputs(run.inputs) || run.id} · {run.row_count ?? 0} rows · {formatWhen(run.created_at)}
+        </option>
+      ))}
+    </Select>
+  );
+}
 
 function Control({
   field,
@@ -43,12 +74,14 @@ function Control({
   }
 
   let control;
-  if (field.kind === "select") {
+  if (field.kind === "run") {
+    control = <RunPicker {...common} tools={field.tools} value={String(value ?? "")} onChange={onChange} />;
+  } else if (field.kind === "select") {
     control = (
       <Select {...common} value={String(value ?? "")} onChange={(e) => onChange(e.target.value)}>
         {field.options?.map((option) => (
           <option key={option} value={option}>
-            {option}
+            {field.optionLabels?.[option] ?? option}
           </option>
         ))}
       </Select>

@@ -18,6 +18,15 @@ export type SiteSummary = Schemas["SiteSummary"];
 export type SiteConfig = Schemas["SiteConfig"];
 export type Section = Schemas["Section"];
 export type Check = Schemas["Check"];
+export type DocumentSummary = Schemas["DocumentSummary"];
+export type DocumentRecord = Schemas["DocumentRecord"];
+export type Draft = Schemas["Draft"];
+export type Brief = Schemas["Brief"];
+export type BriefState = Schemas["BriefState"];
+export type Score = Schemas["Score"];
+export type TermScore = Schemas["TermScore"];
+export type QuestionScore = Schemas["QuestionScore"];
+export type CheckScore = Schemas["CheckScore"];
 
 export interface FieldError {
   field: string;

@@ -111,3 +111,39 @@ describe("initialValues / toInputs", () => {
     });
   });
 });
+
+describe("friendly choices and run pickers", () => {
+  // What Pydantic produces for the Keyword planner's inputs
+  const planner = {
+    properties: {
+      from_run: {
+        anyOf: [{ type: "string" }, { type: "null" }],
+        default: null,
+        title: "Or use a previous run",
+        "x-widget": "run",
+        "x-tools": ["research/query-fanout", "research/autocomplete"],
+      },
+      split: {
+        default: "balanced",
+        enum: ["broad", "balanced", "narrow"],
+        title: "How to split pages",
+        type: "string",
+        "x-labels": { broad: "Fewer, broader pages", balanced: "Balanced", narrow: "More, narrower pages" },
+      },
+    },
+  };
+
+  it("reads the run picker and the choice labels", () => {
+    const [fromRun, split] = fieldsFromSchema(planner);
+    expect(fromRun).toMatchObject({ kind: "run", nullable: true, tools: ["research/query-fanout", "research/autocomplete"] });
+    expect(split).toMatchObject({ kind: "select", optionLabels: { broad: "Fewer, broader pages" } });
+  });
+
+  it("sends the picked run id, or null when none is picked", () => {
+    const fields = fieldsFromSchema(planner);
+    expect(toInputs(fields, { from_run: "", split: "broad" })).toEqual({ from_run: null, split: "broad" });
+    expect(toInputs(fields, { from_run: "20261117-100000-abcdef", split: "broad" })).toMatchObject({
+      from_run: "20261117-100000-abcdef",
+    });
+  });
+});

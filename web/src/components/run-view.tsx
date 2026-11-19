@@ -5,8 +5,10 @@ import { LoaderCircle } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { formatDuration, formatNumber, formatWhen } from "@/lib/format";
-import { isActive, useRun, useRunRows } from "@/lib/queries";
+import { cn } from "@/lib/cn";
+import { isActive, useRun, useRunReport, useRunRows } from "@/lib/queries";
 
+import { ReportView } from "./report-view";
 import { ResultsTable } from "./results-table";
 import { StatusBadge } from "./ui/badge";
 import { Callout, ProgressBar } from "./ui/panel";
@@ -25,6 +27,8 @@ function useNow(active: boolean): number {
 export function RunView({ runId }: { runId: string }) {
   const run = useRun(runId);
   const rows = useRunRows(run.data);
+  const report = useRunReport(run.data);
+  const [tab, setTab] = useState<"plan" | "table">("plan"); // a written plan shows first
   const active = isActive(run.data);
   const now = useNow(active);
 
@@ -80,14 +84,44 @@ export function RunView({ runId }: { runId: string }) {
         <Callout key={note}>{note}</Callout>
       ))}
 
-      {r.status === "done" &&
-        (rows.isPending ? (
-          <p className="text-[12px] text-muted">Loading results…</p>
-        ) : rows.isError ? (
-          <Callout tone="bad">{rows.error.message}</Callout>
-        ) : (
-          <ResultsTable rows={rows.data} runId={r.id} />
-        ))}
+      {r.status === "done" && (
+        <div className="space-y-2">
+          {r.report && (
+            <div role="tablist" aria-label="Results" className="flex gap-1 border-b border-border">
+              {(["plan", "table"] as const).map((name) => (
+                <button
+                  key={name}
+                  role="tab"
+                  type="button"
+                  aria-selected={tab === name}
+                  onClick={() => setTab(name)}
+                  className={cn(
+                    "-mb-px border-b-2 px-3 py-1.5 text-[12px] font-medium",
+                    tab === name ? "border-accent text-foreground" : "border-transparent text-muted hover:text-foreground",
+                  )}
+                >
+                  {name === "plan" ? "Plan" : "Table"}
+                </button>
+              ))}
+            </div>
+          )}
+          {r.report && tab === "plan" ? (
+            report.isPending ? (
+              <p className="text-[12px] text-muted">Loading the plan…</p>
+            ) : report.isError ? (
+              <Callout tone="bad">{report.error.message}</Callout>
+            ) : (
+              <ReportView markdown={report.data} downloadHref={`/api/runs/${encodeURIComponent(r.id)}/report?download=1`} />
+            )
+          ) : rows.isPending ? (
+            <p className="text-[12px] text-muted">Loading results…</p>
+          ) : rows.isError ? (
+            <Callout tone="bad">{rows.error.message}</Callout>
+          ) : (
+            <ResultsTable rows={rows.data} runId={r.id} />
+          )}
+        </div>
+      )}
     </div>
   );
 }

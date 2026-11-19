@@ -6,10 +6,11 @@
  *   array of strings          -> text area, one item per line
  *   integer / number          -> number box with min / max
  *   boolean                   -> checkbox
- *   enum (Python Literal)     -> dropdown
+ *   enum (Python Literal)     -> dropdown; "x-labels" gives each choice a friendly name
+ *   "x-widget": "run"         -> picker of finished runs ("x-tools" limits which tools)
  */
 
-export type FieldKind = "text" | "list" | "integer" | "number" | "boolean" | "select";
+export type FieldKind = "text" | "list" | "integer" | "number" | "boolean" | "select" | "run";
 
 export interface FormField {
   name: string;
@@ -19,6 +20,8 @@ export interface FormField {
   required: boolean;
   nullable: boolean; // empty means "use the default" (Python `X | None`)
   options?: string[];
+  optionLabels?: Record<string, string>;
+  tools?: string[]; // for run pickers: which tools' runs to offer
   min?: number;
   max?: number;
   maxItems?: number;
@@ -42,6 +45,9 @@ interface JsonSchema {
   properties?: Record<string, JsonSchema>;
   required?: string[];
   $defs?: Record<string, JsonSchema>;
+  "x-labels"?: Record<string, string>;
+  "x-widget"?: string;
+  "x-tools"?: string[];
 }
 
 function resolve(node: JsonSchema, root: JsonSchema): JsonSchema {
@@ -51,6 +57,7 @@ function resolve(node: JsonSchema, root: JsonSchema): JsonSchema {
 }
 
 function kindOf(node: JsonSchema): FieldKind {
+  if (node["x-widget"] === "run") return "run";
   if (node.enum) return "select";
   const type = Array.isArray(node.type) ? node.type.find((t) => t !== "null") : node.type;
   if (type === "boolean") return "boolean";
@@ -82,6 +89,8 @@ export function fieldsFromSchema(schema: Record<string, unknown>): FormField[] {
       required: required.has(name),
       nullable,
       options: node.enum?.map(String),
+      optionLabels: outer["x-labels"],
+      tools: outer["x-tools"],
       min: node.minimum,
       max: node.maximum,
       maxItems: node.maxItems,
