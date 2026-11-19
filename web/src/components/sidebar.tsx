@@ -106,12 +106,13 @@ export function Sidebar() {
               {group}
             </p>
             {items.map((tool) => {
-              const href = `/tools/${tool.id}`;
+              // Tools with their own screen (like the content editor) link straight to it
+              const href = tool.page ?? `/tools/${tool.id}`;
               return (
                 <NavLink
                   key={tool.id}
                   href={href}
-                  active={pathname === href}
+                  active={tool.page ? pathname.startsWith(tool.page) : pathname === href}
                   title={tool.ready ? tool.summary : `Needs ${tool.missing.join(", ")}`}
                 >
                   <span

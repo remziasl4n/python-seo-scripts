@@ -9,7 +9,7 @@ test("overview shows the site, the tools and recent runs", async ({ page }) => {
   await expect(page.getByText("swimming pool", { exact: true })).toBeVisible();
   const sidebar = page.getByRole("complementary");
   await expect(sidebar.getByRole("link", { name: "Autocomplete" })).toBeVisible();
-  await expect(sidebar.getByRole("link", { name: "Query fan-out" })).toBeVisible();
+  await expect(sidebar.getByRole("link", { name: "Related searches" })).toBeVisible();
 });
 
 test("a tool runs in the background and shows sortable, filterable results", async ({ page }) => {
@@ -57,9 +57,9 @@ test("invalid inputs are shown next to the field", async ({ page }) => {
 
 test("forms are generated from each tool's schema", async ({ page }) => {
   await page.goto("/tools/research/query-fanout");
-  await expect(page.getByLabel("Seed query or entity")).toBeVisible();
-  await expect(page.getByLabel("Queries per fan-out type")).toHaveValue("6");
-  await expect(page.getByLabel("Record Gemini's real searches")).toBeChecked();
+  await expect(page.getByLabel("Search or topic")).toBeVisible();
+  await expect(page.getByLabel("Searches per kind")).toHaveValue("6");
+  await expect(page.getByLabel("Record Gemini's real Google searches")).toBeChecked();
   await expect(page.getByLabel("Check against autocomplete")).toBeChecked();
 });
 
@@ -69,4 +69,42 @@ test("dark mode is remembered", async ({ page }) => {
   await expect(page.locator("html")).toHaveClass(/dark/);
   await page.reload();
   await expect(page.locator("html")).toHaveClass(/dark/);
+});
+
+test("keyword planner offers friendly choices and earlier runs to build on", async ({ page }) => {
+  // Make sure there's a finished autocomplete run to pick
+  await page.goto("/tools/research/autocomplete");
+  await page.getByLabel("Seed queries").fill("swimming pool");
+  await page.getByLabel("Variations").selectOption("seed only");
+  await page.getByRole("button", { name: "Run" }).click();
+  await expect(page.getByText("Suggestions", { exact: true })).toBeVisible({ timeout: 30_000 });
+
+  await page.goto("/tools/planning/keyword-planner");
+  await expect(page.getByRole("heading", { name: "Keyword planner" })).toBeVisible();
+  const split = page.getByLabel("How to split pages");
+  await expect(split.locator("option")).toHaveText(["Fewer, broader pages", "Balanced", "More, narrower pages"]);
+  await expect(split).toHaveValue("balanced");
+  const runs = page.getByLabel("Or use a previous run");
+  await expect(runs.locator("option").nth(1)).toContainText("Autocomplete: swimming pool");
+
+  // Neither keywords nor a run: the form says what to do, next to the field
+  await page.getByRole("button", { name: "Run" }).click();
+  await expect(page.getByText("add keywords above, or pick a previous run")).toBeVisible();
+});
+
+test("the content editor opens from the sidebar and checks a new draft's inputs", async ({ page }) => {
+  // Nothing here starts a brief, so no Gemini calls are made
+  await page.goto("/");
+  await page.getByRole("complementary").getByRole("link", { name: "Content editor" }).click();
+  await expect(page).toHaveURL(/\/editor$/);
+  await expect(page.getByRole("heading", { name: "Content editor" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Create draft" }).click();
+  await expect(page.getByText("Enter the search you want this page to rank for.")).toBeVisible();
+
+  await page.getByLabel("Keyword").fill("inground pool cost");
+  await page.getByLabel("Top pages to learn from (optional)").fill("not a web address");
+  await page.getByRole("button", { name: "Create draft" }).click();
+  await expect(page.getByText("isn't a web address")).toBeVisible();
+  await expect(page).toHaveURL(/\/editor$/);
 });
