@@ -16,6 +16,7 @@ A tool is a class in src/seo_toolkit/tools/<group>/<name>.py:
 
 The module's docstring is the tool's "How it works" text. The dashboard and the CLI
 build their forms from `Inputs`, so a new tool shows up in both without other changes.
+A tool with its own screen in the web app (like the content editor) sets `page`.
 
 From a notebook:
 
@@ -27,6 +28,7 @@ from __future__ import annotations
 
 import importlib
 import inspect
+import json
 import pkgutil
 import sys
 from abc import ABC, abstractmethod
@@ -40,6 +42,7 @@ from pydantic import BaseModel
 
 from seo_toolkit.connectors.autocomplete import AutocompleteClient
 from seo_toolkit.connectors.gemini import Gemini
+from seo_toolkit.connectors.pages import PageFetcher
 from seo_toolkit.core import output
 from seo_toolkit.core.config import ConfigError, Settings, SiteConfig, get_settings
 from seo_toolkit.core.sites import load_site
@@ -62,6 +65,12 @@ class ToolResult:
     table: pd.DataFrame
     metrics: dict[str, int | float | str] = field(default_factory=dict)  # headline numbers
     notes: list[str] = field(default_factory=list)  # things the user should know about the run
+    # A plain-language write-up (Markdown) shown above the table, e.g. a content plan.
+    # Saved next to the table as <same name>.md.
+    report: str | None = None
+    # Structured results for a screen of the web app (e.g. the content editor's brief).
+    # Saved next to the table as <same name>.data.json.
+    data: dict[str, Any] | None = None
 
 
 def _no_progress(fraction: float, message: str) -> None:
@@ -107,6 +116,25 @@ class RunContext:
             lambda: AutocompleteClient.from_settings(self.settings, refresh=self.refresh),
         )
 
+    @property
+    def pages(self) -> PageFetcher:
+        return self._connector(
+            "pages", lambda: PageFetcher.from_settings(self.settings, refresh=self.refresh)
+        )
+
+    def run_table(self, run_id: str) -> pd.DataFrame:
+        """The results table of an earlier run, so one tool can build on another's output."""
+        from seo_toolkit.core.runs import RunManager  # runs imports this module
+
+        loader = self.connectors.get("run_table")
+        if loader is None:
+            manager = RunManager(lambda: self.settings)
+            loader = self.connectors["run_table"] = manager.table
+        table = loader(run_id)
+        if table is None:
+            raise ConfigError(f"Run {run_id} has no results to use. Pick a finished run.")
+        return table
+
 
 class Tool(ABC):
     name: ClassVar[str]
@@ -114,6 +142,7 @@ class Tool(ABC):
     title: ClassVar[str]
     summary: ClassVar[str]
     needs: ClassVar[tuple[str, ...]] = ()
+    page: ClassVar[str | None] = None  # the web app's screen for this tool, if not the form
     Inputs: ClassVar[type[BaseModel]]
     id: ClassVar[str]
 
@@ -177,7 +206,7 @@ def execute(
     save: bool = True,
     fmt: output.Format = "csv",
 ) -> tuple[ToolResult, Path | None]:
-    """Run a tool and save its table. What the dashboard and the CLI both call."""
+    """Run a tool and save its table (and report, if any). What the web app and CLI call."""
     missing = tool_cls.missing(ctx.settings)
     if missing:
         raise ConfigError(f"{tool_cls.title} needs {', '.join(missing)} in .env.")
@@ -188,7 +217,21 @@ def execute(
         if save
         else None
     )
+    if path is not None and result.report:
+        report_path(path).write_text(result.report, encoding="utf-8")
+    if path is not None and result.data is not None:
+        data_path(path).write_text(json.dumps(result.data, ensure_ascii=False), encoding="utf-8")
     return result, path
+
+
+def report_path(table_path: Path) -> Path:
+    """Where a run's report lives: next to its table, with a .md extension."""
+    return table_path.with_suffix(".md")
+
+
+def data_path(table_path: Path) -> Path:
+    """Where a run's structured data lives: next to its table, as .data.json."""
+    return table_path.with_suffix(".data.json")
 
 
 def run_tool(

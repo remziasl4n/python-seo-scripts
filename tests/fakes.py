@@ -9,6 +9,7 @@ import numpy as np
 from pydantic import BaseModel
 
 from seo_toolkit.connectors.gemini import GroundedAnswer, Source
+from seo_toolkit.connectors.pages import FetchedPage, PageError, extract_page
 
 
 class FakeGemini:
@@ -27,12 +28,18 @@ class FakeGemini:
         self.searches = searches
         self.same_meaning = same_meaning
         self.grounding = True
+        self.on_wait: Any = None
         self.prompts: list[str] = []
         self.ground_calls: list[str] = []
         self.embed_calls: list[list[str]] = []
+        # Answers for other schemas, by schema name: data, or a function of the prompt
+        self.answers: dict[str, Any] = {}
 
     def generate_json(self, prompt: str, schema: type[BaseModel], **kwargs: Any) -> BaseModel:
         self.prompts.append(prompt)
+        answer = self.answers.get(schema.__name__)
+        if answer is not None:
+            return schema.model_validate(answer(prompt) if callable(answer) else answer)
         return schema.model_validate({"queries": self.generated})
 
     def ground(self, prompt: str, **kwargs: Any) -> GroundedAnswer:
@@ -85,3 +92,20 @@ class FakeAutocomplete:
         self.requests += 1
         # "pool cost calculator" comes back for every variation, so it's the most-seen one
         return [f"{query} texas", "pool cost calculator", f"acme pools {query}"]
+
+
+class FakePages:
+    """Serves pages from {address: HTML} (or {address: (final address, HTML)}); any other
+    address is "blocked", like a site that refuses tools."""
+
+    def __init__(self, pages: dict[str, str | tuple[str, str]] | None = None) -> None:
+        self.pages = pages or {}
+        self.calls: list[str] = []
+
+    def fetch(self, url: str) -> FetchedPage:
+        self.calls.append(url)
+        page = self.pages.get(url)
+        if page is None:
+            raise PageError(f"{url} blocked the request (403).")
+        final, html = page if isinstance(page, tuple) else (url, page)
+        return extract_page(html, url, final)

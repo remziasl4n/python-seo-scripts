@@ -58,11 +58,54 @@ class FailingTool(Tool):
         raise type(self).error
 
 
+class ReportingTool(Tool):
+    name = "reporting-test"
+    group = "planning"
+    title = "Reporting"
+    summary = "Returns a table and a written plan."
+    Inputs = NoInputs
+
+    def run(self, inputs, ctx):
+        return ToolResult(
+            pd.DataFrame({"keyword": ["pool cost"]}), report="# Plan\n\n- [ ] Write it\n"
+        )
+
+
+class DataTool(Tool):
+    name = "data-test"
+    group = "content"
+    title = "Data"
+    summary = "Returns a table and data for a screen of the web app."
+    Inputs = NoInputs
+
+    def run(self, inputs, ctx):
+        return ToolResult(pd.DataFrame({"term": ["pool"]}), data={"terms": ["pool"], "n": 1})
+
+
 @pytest.fixture(autouse=True)
 def _unregister_test_tools():
     yield
-    for tool in (BlockingTool, FailingTool):
+    for tool in (BlockingTool, FailingTool, ReportingTool, DataTool):
         Tool._registry.pop(tool.id, None)
+
+
+def test_reports_are_saved_next_to_the_table(manager, settings):
+    run = manager.wait(manager.start(ReportingTool, NoInputs()).id, timeout=5)
+    assert run is not None and run.status == "done"
+    assert run.output and run.report == run.output.removesuffix(".csv") + ".md"
+    assert (settings.project_dir / run.report).read_text() == "# Plan\n\n- [ ] Write it\n"
+    assert manager.report(run.id) == "# Plan\n\n- [ ] Write it\n"
+    plain = manager.wait(manager.start(Autocomplete, autocomplete_inputs()).id, timeout=5)
+    assert plain is not None and plain.report is None and manager.report(plain.id) is None
+
+
+def test_data_is_saved_next_to_the_table(manager, settings):
+    run = manager.wait(manager.start(DataTool, NoInputs()).id, timeout=5)
+    assert run is not None and run.status == "done" and run.output
+    assert (settings.project_dir / run.output.replace(".csv", ".data.json")).is_file()
+    assert manager.data(run.id) == {"terms": ["pool"], "n": 1}
+    plain = manager.wait(manager.start(Autocomplete, autocomplete_inputs()).id, timeout=5)
+    assert plain is not None and manager.data(plain.id) is None
 
 
 def fake_context(settings: Settings, site: str, refresh: bool) -> RunContext:

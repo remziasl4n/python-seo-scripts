@@ -12,6 +12,7 @@ separate worker process later. Each run's table is saved in data/outputs/.
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 import secrets
@@ -29,7 +30,7 @@ from sqlalchemy import select, update
 from seo_toolkit.core.config import ConfigError, Settings, get_settings
 from seo_toolkit.core.db import LOCAL_WORKSPACE, Run, session
 from seo_toolkit.core.errors import ToolkitError
-from seo_toolkit.tools.base import RunContext, Tool, execute
+from seo_toolkit.tools.base import RunContext, Tool, data_path, execute, report_path
 
 log = logging.getLogger(__name__)
 
@@ -75,6 +76,7 @@ class RunRecord(BaseModel):
     notes: list[str] = []
     row_count: int | None = None
     output: str | None = None  # results file, relative to the project folder
+    report: str | None = None  # Markdown write-up (e.g. a content plan), if the tool made one
 
 
 ContextFactory = Callable[[Settings, str, bool], RunContext]
@@ -197,6 +199,11 @@ class RunManager:
                 notes=result.notes,
                 row_count=len(result.table),
                 output=str(path.relative_to(project)) if path else None,
+                report=(
+                    str(report_path(path).relative_to(project))
+                    if path is not None and result.report
+                    else None
+                ),
             )
 
     def wait(self, run_id: str, timeout: float | None = None) -> RunRecord | None:
@@ -245,6 +252,22 @@ class RunManager:
             return None
         path = self._settings().project_dir / record.output
         return path if path.is_file() else None
+
+    def report(self, run_id: str) -> str | None:
+        """The run's Markdown report, if it has one."""
+        record = self.get(run_id)
+        if record is None or record.report is None:
+            return None
+        path = self._settings().project_dir / record.report
+        return path.read_text(encoding="utf-8") if path.is_file() else None
+
+    def data(self, run_id: str) -> dict[str, Any] | None:
+        """The run's structured data (e.g. the content editor's brief), if it has any."""
+        path = self.output_path(run_id)
+        if path is None or not data_path(path).is_file():
+            return None
+        value = json.loads(data_path(path).read_text(encoding="utf-8"))
+        return value if isinstance(value, dict) else None
 
     def table(self, run_id: str) -> pd.DataFrame | None:
         path = self.output_path(run_id)
