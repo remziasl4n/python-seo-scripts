@@ -1,0 +1,7 @@
+# Indirect packages held back to releases at least two weeks old (newer ones were
+# published days before the editor was added). Remove a line once its newer release
+# is two weeks old.
+overrides:
+  prosemirror-inputrules: 1.5.1
+  prosemirror-model: 1.25.12
+  prosemirror-transform: 1.12.5
