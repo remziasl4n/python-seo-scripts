@@ -245,3 +245,21 @@ def test_committed_openapi_schema_is_up_to_date():
 
     committed = json.loads((REPO / "web/src/lib/api/openapi.json").read_text())
     assert committed == create_app().openapi(), "Run: cd web && pnpm gen:api"
+
+
+def test_report_endpoint(client, manager):
+    from test_runs import ReportingTool  # noqa: F401  (registers the tool)
+
+    run = finished(
+        client, manager, client.post("/api/runs", json={"tool_id": "planning/reporting-test"})
+    )
+    report = client.get(f"/api/runs/{run['id']}/report")
+    assert report.status_code == 200
+    assert report.headers["content-type"].startswith("text/markdown")
+    assert report.text.startswith("# Plan")
+    download = client.get(f"/api/runs/{run['id']}/report", params={"download": 1})
+    assert download.headers["content-disposition"].endswith('.md"')
+
+    plain = finished(client, manager, start_autocomplete(client))
+    assert plain["report"] is None
+    assert client.get(f"/api/runs/{plain['id']}/report").status_code == 404

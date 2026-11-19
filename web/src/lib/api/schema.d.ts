@@ -161,6 +161,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/runs/{run_id}/report": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Report
+         * @description The run's written report as Markdown (e.g. a content plan).
+         */
+        get: operations["get_report_api_runs__run_id__report_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/runs/{run_id}/download": {
         parameters: {
             query?: never;
@@ -212,10 +232,225 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/documents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Documents */
+        get: operations["list_documents_api_documents_get"];
+        put?: never;
+        /** Create Document */
+        post: operations["create_document_api_documents_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/documents/{doc_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Document */
+        get: operations["get_document_api_documents__doc_id__get"];
+        /** Save Document */
+        put: operations["save_document_api_documents__doc_id__put"];
+        post?: never;
+        /** Delete Document */
+        delete: operations["delete_document_api_documents__doc_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/documents/{doc_id}/brief": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Brief */
+        get: operations["get_brief_api_documents__doc_id__brief_get"];
+        put?: never;
+        /** Rebuild Brief */
+        post: operations["rebuild_brief_api_documents__doc_id__brief_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/documents/{doc_id}/score": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Score */
+        post: operations["score_api_documents__doc_id__score_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/documents/{doc_id}/check-answers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Answer Check */
+        post: operations["answer_check_api_documents__doc_id__check_answers_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/documents/{doc_id}/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Export */
+        get: operations["export_api_documents__doc_id__export_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * AnswerVerdict
+         * @description Gemini's view of whether the draft answers one of the brief's questions.
+         */
+        AnswerVerdict: {
+            /** Question */
+            question: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "answered" | "partly" | "missing";
+            /**
+             * Section
+             * @default
+             */
+            section: string;
+            /**
+             * Fix
+             * @default
+             */
+            fix: string;
+            /**
+             * Place After
+             * @default
+             */
+            place_after: string;
+        };
+        /** Brief */
+        Brief: {
+            /** Keyword */
+            keyword: string;
+            /** Country */
+            country: string;
+            /** Language */
+            language: string;
+            /** Reader Wants */
+            reader_wants: string;
+            /** Page Type */
+            page_type: string;
+            /** Layout */
+            layout: string[];
+            /** Title */
+            title: string;
+            /** H1 */
+            h1: string;
+            /** Meta Description */
+            meta_description: string;
+            /** Url Slug */
+            url_slug: string;
+            /** Words Min */
+            words_min: number;
+            /** Words Max */
+            words_max: number;
+            /** Headings Min */
+            headings_min: number;
+            /** Headings Max */
+            headings_max: number;
+            /** Terms */
+            terms: components["schemas"]["BriefTerm"][];
+            /** Questions */
+            questions: components["schemas"]["BriefQuestion"][];
+            /** Pages */
+            pages: components["schemas"]["TopPage"][];
+        };
+        /** BriefQuestion */
+        BriefQuestion: {
+            /** Heading */
+            heading: string;
+            /**
+             * Searches
+             * @default []
+             */
+            searches: string[];
+            /**
+             * What To Say
+             * @default
+             */
+            what_to_say: string;
+        };
+        /** BriefState */
+        BriefState: {
+            run: components["schemas"]["RunRecord"] | null;
+            brief: components["schemas"]["Brief"] | null;
+        };
+        /** BriefTerm */
+        BriefTerm: {
+            /** Term */
+            term: string;
+            /**
+             * Importance
+             * @enum {string}
+             */
+            importance: "must" | "should" | "nice";
+            /** Min */
+            min: number;
+            /** Max */
+            max: number;
+            /**
+             * Pages
+             * @default 0
+             */
+            pages: number;
+            /**
+             * Main
+             * @default false
+             */
+            main: boolean;
+        };
         /** Check */
         Check: {
             /** Area */
@@ -230,6 +465,25 @@ export interface components {
             /** Detail */
             detail: string;
         };
+        /** CheckScore */
+        CheckScore: {
+            /** Id */
+            id: string;
+            /**
+             * Group
+             * @enum {string}
+             */
+            group: "Main keyword" | "Answers" | "Easy to read";
+            /** Label */
+            label: string;
+            /** Done */
+            done: boolean;
+            /**
+             * Fixes
+             * @default []
+             */
+            fixes: components["schemas"]["Fix"][];
+        };
         /** Column */
         Column: {
             /** Name */
@@ -240,10 +494,179 @@ export interface components {
              */
             type: "number" | "boolean" | "string";
         };
+        /** DocumentRecord */
+        DocumentRecord: {
+            /** Id */
+            id: string;
+            /** Site */
+            site: string;
+            /** Keyword */
+            keyword: string;
+            /** Name */
+            name: string;
+            /** Brief Run Id */
+            brief_run_id: string | null;
+            /** Score */
+            score: number | null;
+            /** Word Count */
+            word_count: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Title */
+            title: string;
+            /** Meta Description */
+            meta_description: string;
+            /** Url Slug */
+            url_slug: string;
+            /** Content */
+            content: string;
+            /** Answers */
+            answers: components["schemas"]["AnswerVerdict"][] | null;
+            /** Answers Checked At */
+            answers_checked_at: string | null;
+        };
+        /** DocumentSummary */
+        DocumentSummary: {
+            /** Id */
+            id: string;
+            /** Site */
+            site: string;
+            /** Keyword */
+            keyword: string;
+            /** Name */
+            name: string;
+            /** Brief Run Id */
+            brief_run_id: string | null;
+            /** Score */
+            score: number | null;
+            /** Word Count */
+            word_count: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
+         * Draft
+         * @description What the editor saves.
+         */
+        Draft: {
+            /** Name */
+            name: string;
+            /**
+             * Title
+             * @default
+             */
+            title: string;
+            /**
+             * Meta Description
+             * @default
+             */
+            meta_description: string;
+            /**
+             * Url Slug
+             * @default
+             */
+            url_slug: string;
+            /**
+             * Content
+             * @default
+             */
+            content: string;
+        };
+        /** Fix */
+        Fix: {
+            /** Text */
+            text: string;
+            /**
+             * Section
+             * @default
+             */
+            section: string;
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /** Meter */
+        Meter: {
+            /** Count */
+            count: number;
+            /** Min */
+            min: number;
+            /** Max */
+            max: number;
+        };
+        /** NewDocument */
+        NewDocument: {
+            /** Keyword */
+            keyword: string;
+            /** Site */
+            site?: string | null;
+            /**
+             * Pages
+             * @default []
+             */
+            pages: string[];
+            /** Import Url */
+            import_url?: string | null;
+        };
+        /** QuestionScore */
+        QuestionScore: {
+            /** Heading */
+            heading: string;
+            /** Searches */
+            searches: string[];
+            /** What To Say */
+            what_to_say: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "missing" | "heading" | "partly" | "answered";
+            /**
+             * Section
+             * @default
+             */
+            section: string;
+            /**
+             * Fix
+             * @default
+             */
+            fix: string;
+            /**
+             * Place After
+             * @default
+             */
+            place_after: string;
+            /**
+             * Checked
+             * @default false
+             */
+            checked: boolean;
+        };
+        /** RebuildBrief */
+        RebuildBrief: {
+            /**
+             * Pages
+             * @default []
+             */
+            pages: string[];
         };
         /** Rows */
         Rows: {
@@ -328,6 +751,27 @@ export interface components {
             row_count: number | null;
             /** Output */
             output: string | null;
+            /** Report */
+            report: string | null;
+        };
+        /** Score */
+        Score: {
+            /** Score */
+            score: number;
+            /** Label */
+            label: string;
+            words: components["schemas"]["Meter"];
+            headings: components["schemas"]["Meter"];
+            /** Terms */
+            terms: components["schemas"]["TermScore"][];
+            /** Questions */
+            questions: components["schemas"]["QuestionScore"][];
+            /** Checks */
+            checks: components["schemas"]["CheckScore"][];
+            /** Parts */
+            parts: {
+                [key: string]: number;
+            };
         };
         /**
          * Section
@@ -470,6 +914,31 @@ export interface components {
              */
             refresh: boolean;
         };
+        /** TermScore */
+        TermScore: {
+            /** Term */
+            term: string;
+            /**
+             * Importance
+             * @enum {string}
+             */
+            importance: "must" | "should" | "nice";
+            /** Main */
+            main: boolean;
+            /** Pages */
+            pages: number;
+            /** Count */
+            count: number;
+            /** Min */
+            min: number;
+            /** Max */
+            max: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "missing" | "low" | "good" | "over";
+        };
         /** ToolDetail */
         ToolDetail: {
             /** Id */
@@ -488,6 +957,8 @@ export interface components {
             ready: boolean;
             /** Missing */
             missing: string[];
+            /** Page */
+            page: string | null;
             /** Description */
             description: string;
             /** Input Schema */
@@ -513,6 +984,21 @@ export interface components {
             ready: boolean;
             /** Missing */
             missing: string[];
+            /** Page */
+            page: string | null;
+        };
+        /** TopPage */
+        TopPage: {
+            /** Url */
+            url: string;
+            /** Domain */
+            domain: string;
+            /** Title */
+            title: string;
+            /** Word Count */
+            word_count: number;
+            /** Headings */
+            headings: string[];
         };
         /** ValidationError */
         ValidationError: {
@@ -919,6 +1405,37 @@ export interface operations {
             };
         };
     };
+    get_report_api_runs__run_id__report_get: {
+        parameters: {
+            query?: {
+                download?: boolean;
+            };
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     download_api_runs__run_id__download_get: {
         parameters: {
             query?: {
@@ -999,6 +1516,321 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Check"][];
+                };
+            };
+        };
+    };
+    list_documents_api_documents_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentSummary"][];
+                };
+            };
+        };
+    };
+    create_document_api_documents_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NewDocument"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentRecord"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_document_api_documents__doc_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                doc_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentRecord"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    save_document_api_documents__doc_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                doc_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Draft"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentRecord"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_document_api_documents__doc_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                doc_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_brief_api_documents__doc_id__brief_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                doc_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BriefState"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rebuild_brief_api_documents__doc_id__brief_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                doc_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RebuildBrief"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentRecord"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    score_api_documents__doc_id__score_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                doc_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Draft"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Score"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    answer_check_api_documents__doc_id__check_answers_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                doc_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Draft"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentRecord"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    export_api_documents__doc_id__export_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                doc_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

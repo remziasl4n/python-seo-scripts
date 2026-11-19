@@ -17,11 +17,13 @@ Endpoints (all under /api):
     GET    /runs/{id}                    one run: status, progress, metrics, notes, error
     GET    /runs/{id}/rows               the results table as columns + rows
     GET    /runs/{id}/download           the results file   ?format=csv|xlsx
+    GET    /runs/{id}/report             the written report (Markdown), if any   ?download=1
     GET    /setup                        setup checks for a site      ?site=
     POST   /setup/live                   one real call to each configured API
+    …      /documents                    the content editor's drafts (see api/documents.py)
 
 Problems a user can fix (missing key, unknown site) come back as 400 with a plain
-`detail` message; a missing site or run is 404; a duplicate site name is 409. Every
+`detail` message; a missing site, run or draft is 404; a duplicate site name is 409. Every
 invalid request (tool inputs, site settings) is 422 with one error per field:
 {"detail": "...", "errors": [{"field": "sections.0.role", "label": "...", "message": "..."}]}.
 """
@@ -30,8 +32,9 @@ from __future__ import annotations
 
 import io
 import json
-from collections.abc import AsyncIterator, Callable, Mapping, Sequence
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Annotated, Any, Literal
 
 import pandas as pd
@@ -42,10 +45,13 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel, ValidationError
 
 from seo_toolkit import __version__
+from seo_toolkit.api.documents import documents_router
+from seo_toolkit.api.errors import field_errors, invalid
 from seo_toolkit.core import sites as site_store
 from seo_toolkit.core.checks import Check, config_checks, live_checks
 from seo_toolkit.core.config import ConfigError, Settings, SiteConfig, get_settings
 from seo_toolkit.core.db import DatabaseError
+from seo_toolkit.core.documents import DocumentNotFound
 from seo_toolkit.core.errors import ToolkitError
 from seo_toolkit.core.runs import RunManager, RunRecord, Status
 from seo_toolkit.tools.base import GROUPS, Tool, discover
@@ -62,6 +68,7 @@ class ToolSummary(BaseModel):
     summary: str
     ready: bool
     missing: list[str]
+    page: str | None  # the web app's own screen for this tool, instead of its form
 
 
 class ToolDetail(ToolSummary):
@@ -102,12 +109,6 @@ class Sites(BaseModel):
     sites: list[SiteSummary]
 
 
-class FieldError(BaseModel):
-    field: str
-    label: str
-    message: str
-
-
 def _summary(tool: type[Tool], settings: Settings) -> ToolSummary:
     missing = tool.missing(settings)
     return ToolSummary(
@@ -119,6 +120,7 @@ def _summary(tool: type[Tool], settings: Settings) -> ToolSummary:
         summary=tool.summary,
         ready=not missing,
         missing=missing,
+        page=tool.page,
     )
 
 
@@ -128,41 +130,6 @@ def _column_type(series: pd.Series) -> Literal["number", "boolean", "string"]:
     if pd.api.types.is_numeric_dtype(series):
         return "number"
     return "string"
-
-
-def _humanize(name: str) -> str:
-    return name.replace("_", " ").capitalize()
-
-
-def _field_errors(
-    errors: Sequence[Mapping[str, Any]], model: type[BaseModel] | None
-) -> list[FieldError]:
-    """Pydantic errors as {field, label, message}. `field` is a dotted path, e.g.
-    "sections.0.role"; `label` names it the way the form does, e.g. "Sections, row 1: Role".
-    """
-    result = []
-    for e in errors:
-        parts = [str(p) for p in e["loc"]]
-        if parts and parts[0] in ("body", "query", "path"):  # where in the request, not a field
-            parts = parts[1:]
-        if not parts:
-            continue
-        field = model.model_fields.get(parts[0]) if model else None
-        label = field.title if field and field.title else _humanize(parts[0])
-        if len(parts) >= 2 and parts[1].isdigit():
-            label += f", row {int(parts[1]) + 1}"
-            if len(parts) > 2:
-                label += f": {_humanize(parts[2])}"
-        message = str(e["msg"]).removeprefix("Value error, ")
-        result.append(FieldError(field=".".join(parts), label=label, message=message))
-    return result
-
-
-def _invalid(errors: list[FieldError]) -> JSONResponse:
-    return JSONResponse(
-        status_code=422,
-        content={"detail": "Some fields need fixing.", "errors": [e.model_dump() for e in errors]},
-    )
 
 
 def create_app(
@@ -207,6 +174,10 @@ def create_app(
         status = 404 if request.url.path.startswith("/api/sites") else 400
         return JSONResponse(status_code=status, content={"detail": str(error)})
 
+    @app.exception_handler(DocumentNotFound)
+    async def document_not_found(request: Request, error: DocumentNotFound) -> JSONResponse:
+        return JSONResponse(status_code=404, content={"detail": str(error)})
+
     @app.exception_handler(site_store.SiteExists)
     async def site_exists(request: Request, error: site_store.SiteExists) -> JSONResponse:
         return JSONResponse(status_code=409, content={"detail": str(error)})
@@ -214,7 +185,7 @@ def create_app(
     @app.exception_handler(RequestValidationError)
     async def invalid_request(request: Request, error: RequestValidationError) -> JSONResponse:
         model = SiteConfig if request.url.path.startswith("/api/sites") else None
-        return _invalid(_field_errors(error.errors(), model))
+        return invalid(field_errors(error.errors(), model))
 
     def tool_or_404(tool_id: str) -> type[Tool]:
         tools = discover()
@@ -299,7 +270,7 @@ def create_app(
         try:
             inputs = tool.Inputs.model_validate(body.inputs)
         except ValidationError as e:
-            return _invalid(_field_errors(e.errors(), tool.Inputs))
+            return invalid(field_errors(e.errors(), tool.Inputs))
         return runs.start(tool, inputs, site=body.site, refresh=body.refresh)
 
     @app.get("/api/runs")
@@ -329,6 +300,19 @@ def create_app(
             total=len(table),
             truncated=len(table) > ROW_LIMIT,
         )
+
+    @app.get("/api/runs/{run_id}/report", response_class=Response)
+    def get_report(run_id: str, download: bool = False) -> Response:
+        """The run's written report as Markdown (e.g. a content plan)."""
+        record = run_or_404(run_id)
+        text = runs.report(run_id)
+        if text is None:
+            raise HTTPException(404, f"Run {run_id} has no report.")
+        headers = {}
+        if download:
+            name = Path(record.report or f"{run_id}.md").name
+            headers["Content-Disposition"] = f'attachment; filename="{name}"'
+        return Response(text, media_type="text/markdown; charset=utf-8", headers=headers)
 
     @app.get("/api/runs/{run_id}/download", response_model=None)
     def download(run_id: str, format: Literal["csv", "xlsx"] = "csv") -> Response:
@@ -364,4 +348,5 @@ def create_app(
     def setup_live() -> list[Check]:
         return live_checks(settings())
 
+    app.include_router(documents_router(settings, runs))
     return app

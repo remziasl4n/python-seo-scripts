@@ -529,6 +529,49 @@
         }
       }
     },
+    "/api/runs/{run_id}/report": {
+      "get": {
+        "summary": "Get Report",
+        "description": "The run's written report as Markdown (e.g. a content plan).",
+        "operationId": "get_report_api_runs__run_id__report_get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          },
+          {
+            "name": "download",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Download"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/runs/{run_id}/download": {
       "get": {
         "summary": "Download",
@@ -651,10 +694,648 @@
           }
         }
       }
+    },
+    "/api/documents": {
+      "get": {
+        "summary": "List Documents",
+        "operationId": "list_documents_api_documents_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/DocumentSummary"
+                  },
+                  "type": "array",
+                  "title": "Response List Documents Api Documents Get"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Create Document",
+        "operationId": "create_document_api_documents_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewDocument"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentRecord"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/documents/{doc_id}": {
+      "get": {
+        "summary": "Get Document",
+        "operationId": "get_document_api_documents__doc_id__get",
+        "parameters": [
+          {
+            "name": "doc_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Doc Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentRecord"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "Save Document",
+        "operationId": "save_document_api_documents__doc_id__put",
+        "parameters": [
+          {
+            "name": "doc_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Doc Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Draft"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentRecord"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete Document",
+        "operationId": "delete_document_api_documents__doc_id__delete",
+        "parameters": [
+          {
+            "name": "doc_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Doc Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/documents/{doc_id}/brief": {
+      "get": {
+        "summary": "Get Brief",
+        "operationId": "get_brief_api_documents__doc_id__brief_get",
+        "parameters": [
+          {
+            "name": "doc_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Doc Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BriefState"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Rebuild Brief",
+        "operationId": "rebuild_brief_api_documents__doc_id__brief_post",
+        "parameters": [
+          {
+            "name": "doc_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Doc Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RebuildBrief"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentRecord"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/documents/{doc_id}/score": {
+      "post": {
+        "summary": "Score",
+        "operationId": "score_api_documents__doc_id__score_post",
+        "parameters": [
+          {
+            "name": "doc_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Doc Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Draft"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Score"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/documents/{doc_id}/check-answers": {
+      "post": {
+        "summary": "Answer Check",
+        "operationId": "answer_check_api_documents__doc_id__check_answers_post",
+        "parameters": [
+          {
+            "name": "doc_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Doc Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Draft"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentRecord"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/documents/{doc_id}/export": {
+      "get": {
+        "summary": "Export",
+        "operationId": "export_api_documents__doc_id__export_get",
+        "parameters": [
+          {
+            "name": "doc_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Doc Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
     "schemas": {
+      "AnswerVerdict": {
+        "properties": {
+          "question": {
+            "type": "string",
+            "title": "Question"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "answered",
+              "partly",
+              "missing"
+            ],
+            "title": "Status"
+          },
+          "section": {
+            "type": "string",
+            "title": "Section",
+            "default": ""
+          },
+          "fix": {
+            "type": "string",
+            "title": "Fix",
+            "default": ""
+          },
+          "place_after": {
+            "type": "string",
+            "title": "Place After",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "question",
+          "status"
+        ],
+        "title": "AnswerVerdict",
+        "description": "Gemini's view of whether the draft answers one of the brief's questions."
+      },
+      "Brief": {
+        "properties": {
+          "keyword": {
+            "type": "string",
+            "title": "Keyword"
+          },
+          "country": {
+            "type": "string",
+            "title": "Country"
+          },
+          "language": {
+            "type": "string",
+            "title": "Language"
+          },
+          "reader_wants": {
+            "type": "string",
+            "title": "Reader Wants"
+          },
+          "page_type": {
+            "type": "string",
+            "title": "Page Type"
+          },
+          "layout": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Layout"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "h1": {
+            "type": "string",
+            "title": "H1"
+          },
+          "meta_description": {
+            "type": "string",
+            "title": "Meta Description"
+          },
+          "url_slug": {
+            "type": "string",
+            "title": "Url Slug"
+          },
+          "words_min": {
+            "type": "integer",
+            "title": "Words Min"
+          },
+          "words_max": {
+            "type": "integer",
+            "title": "Words Max"
+          },
+          "headings_min": {
+            "type": "integer",
+            "title": "Headings Min"
+          },
+          "headings_max": {
+            "type": "integer",
+            "title": "Headings Max"
+          },
+          "terms": {
+            "items": {
+              "$ref": "#/components/schemas/BriefTerm"
+            },
+            "type": "array",
+            "title": "Terms"
+          },
+          "questions": {
+            "items": {
+              "$ref": "#/components/schemas/BriefQuestion"
+            },
+            "type": "array",
+            "title": "Questions"
+          },
+          "pages": {
+            "items": {
+              "$ref": "#/components/schemas/TopPage"
+            },
+            "type": "array",
+            "title": "Pages"
+          }
+        },
+        "type": "object",
+        "required": [
+          "keyword",
+          "country",
+          "language",
+          "reader_wants",
+          "page_type",
+          "layout",
+          "title",
+          "h1",
+          "meta_description",
+          "url_slug",
+          "words_min",
+          "words_max",
+          "headings_min",
+          "headings_max",
+          "terms",
+          "questions",
+          "pages"
+        ],
+        "title": "Brief"
+      },
+      "BriefQuestion": {
+        "properties": {
+          "heading": {
+            "type": "string",
+            "title": "Heading"
+          },
+          "searches": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Searches",
+            "default": []
+          },
+          "what_to_say": {
+            "type": "string",
+            "title": "What To Say",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "heading"
+        ],
+        "title": "BriefQuestion"
+      },
+      "BriefState": {
+        "properties": {
+          "run": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunRecord"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "brief": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Brief"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "run",
+          "brief"
+        ],
+        "title": "BriefState"
+      },
+      "BriefTerm": {
+        "properties": {
+          "term": {
+            "type": "string",
+            "title": "Term"
+          },
+          "importance": {
+            "type": "string",
+            "enum": [
+              "must",
+              "should",
+              "nice"
+            ],
+            "title": "Importance"
+          },
+          "min": {
+            "type": "integer",
+            "title": "Min"
+          },
+          "max": {
+            "type": "integer",
+            "title": "Max"
+          },
+          "pages": {
+            "type": "integer",
+            "title": "Pages",
+            "default": 0
+          },
+          "main": {
+            "type": "boolean",
+            "title": "Main",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "term",
+          "importance",
+          "min",
+          "max"
+        ],
+        "title": "BriefTerm"
+      },
       "Check": {
         "properties": {
           "area": {
@@ -689,6 +1370,47 @@
         ],
         "title": "Check"
       },
+      "CheckScore": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "group": {
+            "type": "string",
+            "enum": [
+              "Main keyword",
+              "Answers",
+              "Easy to read"
+            ],
+            "title": "Group"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "done": {
+            "type": "boolean",
+            "title": "Done"
+          },
+          "fixes": {
+            "items": {
+              "$ref": "#/components/schemas/Fix"
+            },
+            "type": "array",
+            "title": "Fixes",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "group",
+          "label",
+          "done"
+        ],
+        "title": "CheckScore"
+      },
       "Column": {
         "properties": {
           "name": {
@@ -712,6 +1434,250 @@
         ],
         "title": "Column"
       },
+      "DocumentRecord": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "site": {
+            "type": "string",
+            "title": "Site"
+          },
+          "keyword": {
+            "type": "string",
+            "title": "Keyword"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "brief_run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Brief Run Id"
+          },
+          "score": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score"
+          },
+          "word_count": {
+            "type": "integer",
+            "title": "Word Count"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "meta_description": {
+            "type": "string",
+            "title": "Meta Description"
+          },
+          "url_slug": {
+            "type": "string",
+            "title": "Url Slug"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content"
+          },
+          "answers": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/AnswerVerdict"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Answers"
+          },
+          "answers_checked_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Answers Checked At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "site",
+          "keyword",
+          "name",
+          "brief_run_id",
+          "score",
+          "word_count",
+          "created_at",
+          "updated_at",
+          "title",
+          "meta_description",
+          "url_slug",
+          "content",
+          "answers",
+          "answers_checked_at"
+        ],
+        "title": "DocumentRecord"
+      },
+      "DocumentSummary": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "site": {
+            "type": "string",
+            "title": "Site"
+          },
+          "keyword": {
+            "type": "string",
+            "title": "Keyword"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "brief_run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Brief Run Id"
+          },
+          "score": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score"
+          },
+          "word_count": {
+            "type": "integer",
+            "title": "Word Count"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "site",
+          "keyword",
+          "name",
+          "brief_run_id",
+          "score",
+          "word_count",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "DocumentSummary"
+      },
+      "Draft": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 500,
+            "title": "Title",
+            "default": ""
+          },
+          "meta_description": {
+            "type": "string",
+            "maxLength": 1000,
+            "title": "Meta Description",
+            "default": ""
+          },
+          "url_slug": {
+            "type": "string",
+            "maxLength": 300,
+            "title": "Url Slug",
+            "default": ""
+          },
+          "content": {
+            "type": "string",
+            "maxLength": 2000000,
+            "title": "Content",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "Draft",
+        "description": "What the editor saves."
+      },
+      "Fix": {
+        "properties": {
+          "text": {
+            "type": "string",
+            "title": "Text"
+          },
+          "section": {
+            "type": "string",
+            "title": "Section",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "text"
+        ],
+        "title": "Fix"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -724,6 +1690,143 @@
         },
         "type": "object",
         "title": "HTTPValidationError"
+      },
+      "Meter": {
+        "properties": {
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "min": {
+            "type": "integer",
+            "title": "Min"
+          },
+          "max": {
+            "type": "integer",
+            "title": "Max"
+          }
+        },
+        "type": "object",
+        "required": [
+          "count",
+          "min",
+          "max"
+        ],
+        "title": "Meter"
+      },
+      "NewDocument": {
+        "properties": {
+          "keyword": {
+            "type": "string",
+            "title": "Keyword"
+          },
+          "site": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Site"
+          },
+          "pages": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Pages",
+            "default": []
+          },
+          "import_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Import Url"
+          }
+        },
+        "type": "object",
+        "required": [
+          "keyword"
+        ],
+        "title": "NewDocument"
+      },
+      "QuestionScore": {
+        "properties": {
+          "heading": {
+            "type": "string",
+            "title": "Heading"
+          },
+          "searches": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Searches"
+          },
+          "what_to_say": {
+            "type": "string",
+            "title": "What To Say"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "missing",
+              "heading",
+              "partly",
+              "answered"
+            ],
+            "title": "Status"
+          },
+          "section": {
+            "type": "string",
+            "title": "Section",
+            "default": ""
+          },
+          "fix": {
+            "type": "string",
+            "title": "Fix",
+            "default": ""
+          },
+          "place_after": {
+            "type": "string",
+            "title": "Place After",
+            "default": ""
+          },
+          "checked": {
+            "type": "boolean",
+            "title": "Checked",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "heading",
+          "searches",
+          "what_to_say",
+          "status"
+        ],
+        "title": "QuestionScore"
+      },
+      "RebuildBrief": {
+        "properties": {
+          "pages": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Pages",
+            "default": []
+          }
+        },
+        "type": "object",
+        "title": "RebuildBrief"
       },
       "Rows": {
         "properties": {
@@ -901,6 +2004,17 @@
               }
             ],
             "title": "Output"
+          },
+          "report": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Report"
           }
         },
         "type": "object",
@@ -922,10 +2036,69 @@
           "metrics",
           "notes",
           "row_count",
-          "output"
+          "output",
+          "report"
         ],
         "title": "RunRecord",
         "description": "A run as the API and the web app see it."
+      },
+      "Score": {
+        "properties": {
+          "score": {
+            "type": "integer",
+            "title": "Score"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "words": {
+            "$ref": "#/components/schemas/Meter"
+          },
+          "headings": {
+            "$ref": "#/components/schemas/Meter"
+          },
+          "terms": {
+            "items": {
+              "$ref": "#/components/schemas/TermScore"
+            },
+            "type": "array",
+            "title": "Terms"
+          },
+          "questions": {
+            "items": {
+              "$ref": "#/components/schemas/QuestionScore"
+            },
+            "type": "array",
+            "title": "Questions"
+          },
+          "checks": {
+            "items": {
+              "$ref": "#/components/schemas/CheckScore"
+            },
+            "type": "array",
+            "title": "Checks"
+          },
+          "parts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Parts"
+          }
+        },
+        "type": "object",
+        "required": [
+          "score",
+          "label",
+          "words",
+          "headings",
+          "terms",
+          "questions",
+          "checks",
+          "parts"
+        ],
+        "title": "Score"
       },
       "Section": {
         "properties": {
@@ -1153,6 +2326,65 @@
         ],
         "title": "StartRun"
       },
+      "TermScore": {
+        "properties": {
+          "term": {
+            "type": "string",
+            "title": "Term"
+          },
+          "importance": {
+            "type": "string",
+            "enum": [
+              "must",
+              "should",
+              "nice"
+            ],
+            "title": "Importance"
+          },
+          "main": {
+            "type": "boolean",
+            "title": "Main"
+          },
+          "pages": {
+            "type": "integer",
+            "title": "Pages"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "min": {
+            "type": "integer",
+            "title": "Min"
+          },
+          "max": {
+            "type": "integer",
+            "title": "Max"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "missing",
+              "low",
+              "good",
+              "over"
+            ],
+            "title": "Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "term",
+          "importance",
+          "main",
+          "pages",
+          "count",
+          "min",
+          "max",
+          "status"
+        ],
+        "title": "TermScore"
+      },
       "ToolDetail": {
         "properties": {
           "id": {
@@ -1190,6 +2422,17 @@
             "type": "array",
             "title": "Missing"
           },
+          "page": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Page"
+          },
           "description": {
             "type": "string",
             "title": "Description"
@@ -1210,6 +2453,7 @@
           "summary",
           "ready",
           "missing",
+          "page",
           "description",
           "input_schema"
         ],
@@ -1251,6 +2495,17 @@
             },
             "type": "array",
             "title": "Missing"
+          },
+          "page": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Page"
           }
         },
         "type": "object",
@@ -1262,9 +2517,46 @@
           "title",
           "summary",
           "ready",
-          "missing"
+          "missing",
+          "page"
         ],
         "title": "ToolSummary"
+      },
+      "TopPage": {
+        "properties": {
+          "url": {
+            "type": "string",
+            "title": "Url"
+          },
+          "domain": {
+            "type": "string",
+            "title": "Domain"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "word_count": {
+            "type": "integer",
+            "title": "Word Count"
+          },
+          "headings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Headings"
+          }
+        },
+        "type": "object",
+        "required": [
+          "url",
+          "domain",
+          "title",
+          "word_count",
+          "headings"
+        ],
+        "title": "TopPage"
       },
       "ValidationError": {
         "properties": {
