@@ -159,23 +159,44 @@ def _retry_delay(error: errors.APIError) -> float | None:
     return None
 
 
+PER_MINUTE_WAIT = 62.0  # a per-minute quota frees up when the next minute starts
+
+
+def _per_minute_quota(error: errors.APIError) -> bool:
+    """True for "N requests per minute" limits (e.g. 100 embeddings a minute on the free
+    plan). Google's suggested delay for these can be a few milliseconds, which is too
+    short: the quota only frees up when the minute rolls over."""
+    body = error.details if isinstance(error.details, dict) else {}
+    for detail in body.get("error", {}).get("details", None) or []:
+        if isinstance(detail, dict) and str(detail.get("@type", "")).endswith("QuotaFailure"):
+            for violation in detail.get("violations", []) or []:
+                if "PerMinute" in str(violation.get("quotaId", "")):
+                    return True
+    return False
+
+
 def _is_retryable(error: BaseException) -> bool:
     if isinstance(error, (errors.ServerError, httpx.TimeoutException)):
         return True
     return (
         isinstance(error, errors.ClientError)
         and error.code == 429
-        and _retry_delay(error) is not None
+        and (_retry_delay(error) is not None or _per_minute_quota(error))
     )
 
 
 def _wait_with(backoff: wait_base) -> Callable[[RetryCallState], float]:
-    """Wait as long as Google asks when it says; otherwise back off exponentially."""
+    """Wait out per-minute quotas; otherwise as long as Google asks, or back off."""
 
     def wait(state: RetryCallState) -> float:
         error = state.outcome.exception() if state.outcome else None
-        delay = _retry_delay(error) if isinstance(error, errors.APIError) else None
-        return min(delay, 60.0) if delay is not None else backoff(state)
+        if isinstance(error, errors.APIError):
+            if _per_minute_quota(error):
+                return PER_MINUTE_WAIT
+            delay = _retry_delay(error)
+            if delay is not None:
+                return min(max(delay, 1.0), 60.0)
+        return backoff(state)
 
     return wait
 
@@ -192,6 +213,12 @@ def _explain(error: errors.APIError, model: str, purpose: Purpose) -> str:
         return (
             f"Gemini model {model} not found ({code}).\n"
             f"Check {setting} in .env against https://aistudio.google.com/docs/models."
+        )
+    if code == 429 and _per_minute_quota(error):
+        return (
+            f"Gemini's per-minute limit for {purpose} on {model} kept being hit, even after "
+            "waiting (429). The free plan allows about 100 embeddings a minute: try a shorter "
+            "list, run it again (finished parts are cached), or enable billing."
         )
     if code == 429 and _retry_delay(error) is None:
         advice = (
@@ -246,12 +273,19 @@ class Gemini:
         self.batch_size = batch_size
         self.timeout_seconds = timeout_seconds
         self.usage = Usage()
+        # Told how long a retry will wait (e.g. for a per-minute quota), so a tool can show it
+        self.on_wait: Callable[[float], None] | None = None
         self._retrying = Retrying(
             retry=retry_if_exception(_is_retryable),
             stop=stop_after_attempt(max_attempts),
             wait=retry_wait or _wait_with(wait_exponential(multiplier=2, max=60)),
+            before_sleep=self._before_sleep,
             reraise=True,
         )
+
+    def _before_sleep(self, state: RetryCallState) -> None:
+        if self.on_wait and state.next_action is not None:
+            self.on_wait(state.next_action.sleep)
 
     @classmethod
     def from_settings(
@@ -470,12 +504,14 @@ class Gemini:
         texts: Sequence[str],
         task: EmbedTask = "similarity",
         titles: Sequence[str | None] | None = None,
+        progress: Callable[[int, int], None] | None = None,
     ) -> np.ndarray:
         """Embed texts as an array of shape (len(texts), dimensions), each row unit length.
 
         Use task="query" for search queries and task="document" (optionally with titles)
         for passages you want to match against them. Inputs over the model's token limit
         (8,192 for gemini-embedding-2) are silently cut, so embed passages, not whole pages.
+        `progress(done, total)` is called after each batch sent to Gemini.
         """
         if titles is not None and (task != "document" or len(titles) != len(texts)):
             raise ValueError("titles only apply to task='document', one per text.")
@@ -513,6 +549,8 @@ class Gemini:
                     vectors[i] = values
                 if self.cache:
                     self.cache.set("gemini.embed", key(text), values)
+            if progress:
+                progress(min(start + self.batch_size, len(pending)), len(pending))
 
         if not vectors:
             return np.empty((0, self.dimensions), dtype=np.float32)

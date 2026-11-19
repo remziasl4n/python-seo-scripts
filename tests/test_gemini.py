@@ -327,6 +327,39 @@ def test_waits_as_long_as_google_asks(client):
     assert sleeps == [7.0]
 
 
+def per_minute_error() -> errors.APIError:
+    """What the free plan returns at 100 embeddings a minute (with a uselessly short delay)."""
+    error = api_error(errors.ClientError, 429, "quota exceeded", retry_delay="0.069s")
+    error.details["error"]["details"].append(
+        {
+            "@type": "type.googleapis.com/google.rpc.QuotaFailure",
+            "violations": [
+                {"quotaId": "EmbedContentRequestsPerMinutePerUserPerProjectPerModel-FreeTier"}
+            ],
+        }
+    )
+    return error
+
+
+def test_per_minute_limits_wait_for_the_next_minute(client):
+    sleeps: list[float] = []
+    waits: list[float] = []
+    gemini = Gemini(client, model="m", embedding_model="gemini-embedding-2", dimensions=8)
+    gemini._retrying.sleep = sleeps.append
+    gemini.on_wait = waits.append  # how a tool shows "waiting for the free-plan limit"
+    client.models.embed_errors = [per_minute_error()]
+    progress: list[tuple[int, int]] = []
+    gemini.embed(["a", "b"], progress=lambda done, total: progress.append((done, total)))
+    assert sleeps == [62.0] and waits == [62.0]  # not Google's 0.069s
+    assert progress == [(2, 2)]
+
+
+def test_per_minute_limit_that_never_clears_says_what_to_do(gemini, client):
+    client.models.embed_errors = [per_minute_error()] * 5
+    with pytest.raises(GeminiError, match="about 100 embeddings a minute"):
+        gemini.embed(["x"])
+
+
 def test_quota_without_retry_delay_fails_at_once(gemini, client):
     client.models.responses.append(api_error(errors.ClientError, 429, "exceeded your quota"))
     with pytest.raises(GeminiError, match="no quota for text on gemini-test"):
