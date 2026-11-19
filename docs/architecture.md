@@ -40,7 +40,7 @@ Browser ──► Next.js app (web/)  ──/api──►  FastAPI (src/seo_tool
 
 ## Decisions that keep the SaaS path open
 
-1. **Every user-data table has `workspace_id`.** That's `runs` and `sites` so far. Locally it's `"local"`; a hosted version takes it from the signed-in user's organisation. Queries always filter by it (see `RunManager` and `core/sites.py`). Sites live in the database and are edited in the web app, because a SaaS user can't edit files on a server. YAML is kept for import (`seo db setup`) and export.
+1. **Every user-data table has `workspace_id`.** That's `runs`, `sites` and `documents` (the content editor's drafts) so far. Locally it's `"local"`; a hosted version takes it from the signed-in user's organisation. Queries always filter by it (see `RunManager` and `core/sites.py`). Sites live in the database and are edited in the web app, because a SaaS user can't edit files on a server. YAML is kept for import (`seo db setup`) and export.
 2. **The same database everywhere.** Postgres locally and in production, so there's one set of behaviour to test. The tests create a throwaway database per session.
 3. **Anything that changes when hosted sits behind one small interface:** job running (`RunManager`), file storage, cache (`core/cache.py`), and secrets (`.env` now, encrypted per-workspace keys later).
 4. **Tools stay pure.** No database, web or auth code inside a tool.

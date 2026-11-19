@@ -175,7 +175,7 @@ These come from the semantic writing rules taught in the framework. A script can
   2. A grounded Gemini call records the searches Gemini actually runs (`source = gemini-search`).
   3. Every query is checked against autocomplete and, if connected, GSC impressions.
   4. Near-identical rewordings are merged by embedding similarity.
-- *Output:* query, fan-out type, intent, entity, attribute, sources, autocomplete hit, GSC impressions
+- *Output:* query, fan-out type, intent, entity, attribute, sources, autocomplete hit, GSC impressions. The tool is called **Related searches** in the app, and its table uses plain labels (kind, reader wants, topic, aspect, found by; evidence *confirmed / partly confirmed / Gemini only*).
 - *Needs:* Gemini key
 
 **`autocomplete` ★**: what people actually type
@@ -193,13 +193,15 @@ These come from the semantic writing rules taught in the framework. A script can
 - *Output:* attribute, class, value type and unit, prominence, relevance, priority, core/outer, example queries
 - *Needs:* Gemini key
 
-**`keyword-clusters` ★**: group a keyword list into topics
-- *Principles:* Google clusters similar results; representative query
+**Keyword planner** (`planning/keyword-planner`, built): keyword list → pages, with a plain-English content plan
+- *Principles:* Google clusters similar results; representative query; macro/micro context; writing rules (2.4); core/outer sections; ranking signal dilution
 - *Method:*
-  - **Grouping:** SERP overlap when a SERP API is configured, otherwise Gemini embeddings (clustering task).
-  - **Naming:** each cluster gets a representative query (most impressions, else nearest the centre) and an intent label.
-- *Output:* keyword, cluster, representative query, intent, method used
-- *Needs:* Gemini key (SERP API optional)
+  - **Grouping:** Gemini embeddings (clustering task) with **average-linkage clustering on centred vectors**. Keywords from one topic all score 0.88–0.98 raw, so the list's shared component is removed first. Groups over 30 keywords are re-grouped on their own (a 791-keyword test list otherwise produced a 311-keyword group). Lists under 8 keywords use plain similarity. SERP overlap can replace this when a SERP API exists.
+  - **Pages:** lone keywords without outside evidence are folded into the nearest page as a section. Gemini picks each page's main keyword (the broadest wording) and writes the title, H1, meta description and question headings in reading order, using the site's source context and sections. Pages Gemini marks as answering the same question, or with identical H1s, are merged and re-planned (Framework: ranking signal dilution).
+  - **Order:** core-section pages, more keywords and observed search evidence first: *Write first / Next / Later*.
+  - **Rules:** `core/writing_rules.py` turns the writing rules into plain-English checklists per page purpose. A test fails if jargon appears in anything the user sees.
+- *Output:* a content plan (Markdown, shown first in the web app) and a keyword table: page, priority, role (main keyword / heading / in the text), where to use it, heading, reader's goal, page type, URL, fit, evidence
+- *Needs:* Gemini key. Free plan: about 100 new keywords a minute (the connector waits out per-minute limits).
 
 **`intent`**: labels each keyword as informational, commercial, transactional or navigational, plus funnel stage and the page type it needs. *Needs:* Gemini key
 
@@ -235,6 +237,17 @@ These come from the semantic writing rules taught in the framework. A script can
 - *Needs:* Gemini key
 
 **`entity-salience`**: whether the page is clearly about what you think it's about. Natural Language API entities and salience for your page and competitors. Flags when the central entity isn't the most salient entity, or when key entities are missing. *Needs:* Google API key
+
+**Content editor** (`content/content-editor`, built): a writing screen with a live score, Rankability-style
+- *Principles:* phrase-based indexing and co-occurring phrases (Patent), query fan-out and passage retrieval (Google), writing rules (2.4), main keyword placement (Topicality: title, H1, anchors)
+- *Method:*
+  - **Top pages:** the pages Google's AI cites in a grounded answer (redirect links resolved, at most two per site, the user's own site and video/social sites skipped), plus any the user pastes. Only the main content is read (trafilatura), from public addresses only.
+  - **Words to use:** 1–3-word phrases used by at least 30% of the pages (two or more), with plurals folded and phrases stopped at punctuation. A word that nearly always sits inside a longer kept phrase is dropped. Targets are the middle half of how often the pages that use a phrase use it, scaled to the planned length. Gemini picks the 25–50 that matter (at most 12 *must use*) and adds up to 10 the pages miss. Single words of the main keyword aren't targets: they come with it. This is the co-occurrence half of `phrase-gap`; information gain isn't computed yet.
+  - **Questions:** Related searches (fan-out plus autocomplete) become 6–12 question headings in reading order, each with what to cover.
+  - **Score (0–100), live:** words used within range (45), questions with a heading or answered (25), the checklist (20: main keyword in title, H1, URL, first sentence and meta description; title and meta lengths; one H1; question headings answered in a first sentence of ≤50 words that doesn't open with "it"/"this"; short paragraphs; exact numbers instead of vague words; no empty sections), and length (10).
+  - **Check my answers:** one Gemini call judges each question answered / partly / missing against the draft's sections, says what to add, and where to put a missing section. This replaces `fanout-coverage`'s embedding match for now: it explains *what* is missing, not just a score.
+- *Output:* drafts (stored per workspace), a writer's brief (Markdown) and the words-to-use table for each brief run
+- *Needs:* Gemini key
 
 **`content-brief`**: combines `query-fanout`, `entity-attributes`, `phrase-gap` and `page-structure` rules into a writer's brief: macro context, H2 outline ordered for contextual flow, attributes with value types, questions with answer formats, and internal links to add. *Needs:* Gemini key
 
@@ -277,7 +290,7 @@ These come from the semantic writing rules taught in the framework. A script can
   1. Start from the site config: source context and central entity.
   2. `entity-attributes` gives the attributes with their core/outer labels.
   3. `query-fanout` and query templates run for each attribute.
-  4. `keyword-clusters` groups the results into nodes.
+  4. The keyword planner (`planning/keyword-planner`) groups the results into pages.
   5. Each node gets a page type, representative query, outline and contextual bridges.
   6. Existing coverage is marked from crawl and GSC data.
   7. Nodes are ordered so foundational nodes come before the pages that depend on them, weighted by demand.
